@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCR - Aeropuerto Santa Elena</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    :root { --panel-bg: #dbe2e6; --panel-border: #94a3b8; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+    body { background-color: #0f172a; color: #1e293b; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 1rem; }
+    
+    .login-container { background: #1e293b; color: white; border-radius: 12px; padding: 2rem; width: 100%; max-width: 380px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    .input-group { margin-bottom: 1rem; text-align: left; }
+    .input-group label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.3rem; }
+    .input-group input { width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: white; outline: none; }
+    .btn-action { width: 100%; padding: 0.7rem; border-radius: 6px; border: none; background: #2563eb; color: white; font-weight: bold; cursor: pointer; }
+    .btn-action:hover { background: #1d4ed8; }
+    .btn-danger { background: #ef4444; color: white; border: none; border-radius: 4px; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: bold; }
+    .btn-warning { background: #f59e0b; color: white; border: none; border-radius: 4px; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: bold; }
+    .btn-secondary { background: #475569; color: white; border: none; border-radius: 4px; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: bold; }
+    .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 4px; }
+    .error-text { color: #ef4444; font-size: 0.8rem; margin-top: 0.8rem; display: none; }
+
+    .mimic-panel { display: none; background: #deddd9; border: 6px solid #8e959b; border-radius: 8px; width: 100%; max-width: 1200px; padding: 1.5rem; position: relative; box-shadow: inset 0 0 15px rgba(0,0,0,0.2); }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; background: #0f172a; color: white; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem; }
+    .user-badge { background: #2563eb; color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
+    .panel-header { text-align: center; margin-bottom: 1rem; border-bottom: 2px solid #a3a8ad; padding-bottom: 0.5rem; }
+    .panel-header h1 { font-size: 1.6rem; color: #1e293b; letter-spacing: 2px; }
+
+    /* MAPA AGL INTERACTIVO */
+    .map-container { position: relative; background: #fdfbf7; border: 3px solid #8e959b; border-radius: 6px; padding: 1rem; margin-bottom: 1.5rem; box-shadow: inset 0 0 10px rgba(0,0,0,0.05); }
+    svg { width: 100%; height: auto; display: block; }
+
+    /* ESTILOS DE LUCES LED */
+    .led-orange, .led-blue, .led-papi { fill: #a3a8ad; stroke: #1e293b; stroke-width: 1.5; transition: all 0.4s ease; opacity: 0.3; }
+
+    /* FARO PARPADEO BLANCO / VERDE CON ALTA VISIBILIDAD */
+    @keyframes beacon-flash {
+      0%, 45% { fill: #ffffff; stroke: #0284c7; stroke-width: 2px; filter: drop-shadow(0 0 12px #0ea5e9) drop-shadow(0 0 4px #ffffff); opacity: 1; }
+      50%, 95% { fill: #22c55e; stroke: #15803d; stroke-width: 2px; filter: drop-shadow(0 0 12px #22c55e); opacity: 1; }
+      100% { fill: #ffffff; opacity: 1; }
+    }
+    .beacon-active { animation: beacon-flash 1.2s infinite; }
+
+    @keyframes alarm-blink { 0%, 100% { fill: #ef4444; opacity: 1; filter: drop-shadow(0 0 12px #ef4444); } 50% { fill: #a3a8ad; opacity: 0.2; filter: none; } }
+    .alarm-active { animation: alarm-blink 0.8s infinite !important; }
+
+    /* CONTROLES Y PADS */
+    .controls-bar { display: flex; justify-content: space-around; align-items: flex-start; background: #c2c7cc; padding: 1.5rem 1rem; border-radius: 6px; border: 2px solid #8e959b; flex-wrap: wrap; gap: 1.2rem; }
+    .control-box { display: flex; flex-direction: column; align-items: center; background: #deddd9; padding: 1rem; border-radius: 8px; border: 2px solid #8e959b; min-width: 250px; position: relative; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .box-label { font-size: 0.85rem; font-weight: bold; background: #ffffff; padding: 0.2rem 0.6rem; border: 1px solid #8e959b; margin-bottom: 0.5rem; text-transform: uppercase; color: #0f172a; }
+    .intensity-tag { font-size: 0.75rem; font-weight: bold; color: #2563eb; margin-bottom: 0.5rem; height: 18px; }
+    .transitioning-tag { color: #d97706 !important; animation: pulse 1s infinite; }
+
+    /* MASTER INDIVIDUAL */
+    .individual-master { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; background: #ffffff; padding: 0.3rem 0.6rem; border-radius: 6px; border: 1px solid #8e959b; }
+    .master-text { font-size: 0.7rem; font-weight: bold; color: #334155; }
+    .mini-switch { position: relative; width: 44px; height: 22px; background: #94a3b8; border-radius: 11px; cursor: pointer; transition: background 0.3s; }
+    .mini-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: white; border-radius: 50%; transition: transform 0.3s; }
+    .mini-switch.active { background: #22c55e; }
+    .mini-switch.active::after { transform: translateX(22px); }
+
+    /* PADS NUMÉRICOS (1 AL 5) */
+    .pads-container { display: flex; gap: 0.4rem; justify-content: center; margin-top: 0.3rem; }
+    .pad-btn { width: 38px; height: 38px; border-radius: 6px; border: 2px solid #64748b; background: #0f172a; color: white; font-weight: bold; font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease; }
+    .pad-btn:hover:not(:disabled) { background: #2563eb; border-color: #3b82f6; }
+    .pad-btn.active { background: #22c55e; border-color: #16a34a; color: white; box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
+    .pad-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .switch-btn { width: 80px; height: 40px; background: #475569; border-radius: 20px; border: 2px solid #334155; cursor: pointer; position: relative; transition: background 0.3s ease; margin-top: 10px; }
+    .switch-btn::after { content: ''; position: absolute; top: 3px; left: 4px; width: 30px; height: 30px; background: white; border-radius: 50%; transition: transform 0.3s ease; }
+    .switch-btn.active { background: #22c55e; }
+    .switch-btn.active::after { transform: translateX(40px); }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    .fault-module, .audit-section, .manager-section { margin-top: 1.5rem; background: #0f172a; color: white; padding: 1rem; border-radius: 6px; border: 1px solid #334155; }
+    .fault-title, .audit-title, .manager-title { font-size: 0.9rem; font-weight: bold; color: #38bdf8; margin-bottom: 0.8rem; text-transform: uppercase; }
+    .fault-buttons { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+    .log-table-container { max-height: 200px; overflow-y: auto; border: 1px solid #334155; margin-top: 0.5rem; }
+    .log-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .log-table th, .log-table td { border: 1px solid #334155; padding: 0.4rem 0.6rem; text-align: left; }
+    .log-table th { background: #1e293b; color: #94a3b8; }
+    .level-INFO { color: #38bdf8; font-weight: bold; } .level-ALARM { color: #ef4444; font-weight: bold; }
+    .manager-only { display: none; }
+
+    .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 768px) { .admin-grid { grid-template-columns: 1fr; } }
+    .admin-card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 0.8rem; }
+    .admin-card h4 { font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.6rem; border-bottom: 1px solid #334155; padding-bottom: 0.3rem; }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <div class="login-container" id="loginBox">
+    <h2 style="margin-bottom: 1rem;">CCR by CNS/AVE</h2>
+    <form onsubmit="event.preventDefault(); login();">
+      <div class="input-group"><label>Usuario</label><input type="text" id="userInput" placeholder="Ingresa usuario" autocomplete="off"></div>
+      <div class="input-group"><label>Contraseña</label><input type="password" id="passInput" placeholder="••••••••"></div>
+      <button type="submit" class="btn-action">INGRESAR AL SISTEMA</button>
+    </form>
+    <div class="error-text" id="errorText">Usuario o contraseña incorrectos o sesión cerrada por el Gerente</div>
+  </div>
+
+  <!-- TABLERO PRINCIPAL -->
+  <div class="mimic-panel" id="mimicPanel">
+    <div class="top-bar">
+      <div><span>Usuario activo:</span> <span class="user-badge" id="currentUserDisplay">--</span></div>
+      <div>
+        <button class="btn-warning manager-only" id="btnExportPDF" onclick="generatePDFReport()" style="margin-right: 0.5rem;">Generar Reporte PDF</button>
+        <button class="btn-danger" onclick="logout()">Cerrar Sesión</button>
+      </div>
+    </div>
+
+    <div class="panel-header">
+      <h1>AEROPUERTO SANTA ELENA</h1>
+      <h3 style="color: #475569; font-weight: 600;">PANEL MÍMICO Y CONTROL DE REGULADORES (CCR / AGL)</h3>
+    </div>
+
+    <!-- MAPA SVG INTERACTIVO -->
+    <div class="map-container">
+      <svg viewBox="0 0 1000 420">
+        <!-- RAMPA MILITAR -->
+        <g id="rampa-militar">
+          <rect x="440" y="30" width="120" height="40" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+          <path d="M 440 40 H 560 M 440 50 H 560 M 440 60 H 560" stroke="#1e293b" stroke-width="0.8"/>
+          <path d="M 460 30 V 70 M 480 30 V 70 M 500 30 V 70 M 520 30 V 70 M 540 30 V 70" stroke="#1e293b" stroke-width="0.8"/>
+          
+          <path d="M 420 85 L 450 70 L 550 70 L 580 85 L 540 120 L 460 120 Z" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+          <path d="M 400 120 L 460 120 M 540 120 L 600 120" stroke="#1e293b" stroke-width="1.5"/>
+          <line x1="430" y1="120" x2="390" y2="210" stroke="#1e293b" stroke-width="1.5"/>
+          <line x1="570" y1="120" x2="710" y2="210" stroke="#1e293b" stroke-width="1.5"/>
+
+          <text x="500" y="22" fill="#1e293b" font-size="11" font-weight="bold" text-anchor="middle">RAMPA MILITAR</text>
+
+          <!-- Luces LED Taxeo/Rodaje Rampa Militar (AZUL) -->
+          <circle class="led-blue" cx="485" cy="30" r="4.5"/>
+          <circle class="led-blue" cx="515" cy="30" r="4.5"/>
+          <circle class="led-blue" cx="440" cy="50" r="4.5"/>
+          <circle class="led-blue" cx="560" cy="50" r="4.5"/>
+          <circle class="led-blue" cx="445" cy="70" r="4.5"/>
+          <circle class="led-blue" cx="500" cy="70" r="4.5"/>
+          <circle class="led-blue" cx="555" cy="70" r="4.5"/>
+          <circle class="led-blue" cx="430" cy="80" r="4.5"/>
+          <circle class="led-blue" cx="570" cy="80" r="4.5"/>
+          <circle class="led-blue" cx="460" cy="120" r="4.5"/>
+          <circle class="led-blue" cx="540" cy="120" r="4.5"/>
+          <circle class="led-blue" cx="410" cy="160" r="4.5"/>
+          <circle class="led-blue" cx="640" cy="160" r="4.5"/>
+        </g>
+
+        <!-- PISTA PRINCIPAL (11 - 28/29) -->
+        <g id="pista-principal">
+          <rect x="50" y="210" width="900" height="26" fill="#2d3748" stroke="#1e293b" stroke-width="2"/>
+          <line x1="50" y1="223" x2="950" y2="223" stroke="#ffffff" stroke-dasharray="12 8" stroke-width="1.5"/>
+
+          <text x="62" y="227" fill="#ffffff" font-size="11" font-weight="bold">11</text>
+          <text x="925" y="227" fill="#ffffff" font-size="11" font-weight="bold">28</text>
+
+          <path d="M 880 236 L 930 280 L 970 280 L 950 236" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+
+          <!-- Luces Pista Superior (ANARANJADO) -->
+          <g id="group-orange-leds">
+            <circle class="led-orange" cx="80" cy="195" r="4.5"/>
+            <!-- PAPI 11: En la 2da luz superior (cx=130) -->
+            <circle class="led-papi" id="papi-11-led" cx="130" cy="178" r="5.5"/>
+            <circle class="led-orange" cx="130" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="180" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="230" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="280" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="330" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="380" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="430" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="480" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="530" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="580" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="630" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="680" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="730" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="780" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="830" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="880" cy="195" r="4.5"/>
+            <circle class="led-orange" cx="930" cy="195" r="4.5"/>
+
+            <!-- Luces Pista Inferior (ANARANJADO) -->
+            <circle class="led-orange" cx="80" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="130" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="180" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="230" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="280" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="330" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="380" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="430" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="480" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="530" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="580" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="630" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="680" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="730" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="780" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="830" cy="250" r="4.5"/>
+            <!-- PAPI 28/29: En la 2da luz inferior de la 28/29 (cx=880) -->
+            <circle class="led-papi" id="papi-29-led" cx="880" cy="267" r="5.5"/>
+            <circle class="led-orange" cx="880" cy="250" r="4.5"/>
+            <circle class="led-orange" cx="930" cy="250" r="4.5"/>
+          </g>
+        </g>
+
+        <!-- LUCES DE FINAL DE PISTA (BICOLOR RELLENO COMPLETO) -->
+        <!-- Cabecera 11: Verde (Izquierda) / Rojo (Derecha) -->
+        <g id="threshold-11" transform="translate(42, 223)">
+          <path id="th11-v" d="M 0 -8 A 8 8 0 0 0 0 8 Z" fill="#a3a8ad" opacity="0.3" stroke="#1e293b" stroke-width="0.8"/>
+          <path id="th11-r" d="M 0 -8 A 8 8 0 0 1 0 8 Z" fill="#a3a8ad" opacity="0.3" stroke="#1e293b" stroke-width="0.8"/>
+        </g>
+
+        <!-- Cabecera 28/29: Rojo (Izquierda) / Verde (Derecha) -->
+        <g id="threshold-28" transform="translate(958, 223)">
+          <path id="th28-r" d="M 0 -8 A 8 8 0 0 0 0 8 Z" fill="#a3a8ad" opacity="0.3" stroke="#1e293b" stroke-width="0.8"/>
+          <path id="th28-v" d="M 0 -8 A 8 8 0 0 1 0 8 Z" fill="#a3a8ad" opacity="0.3" stroke="#1e293b" stroke-width="0.8"/>
+        </g>
+
+        <!-- TERMINAL AÉREA -->
+        <g id="terminal-aerea">
+          <path d="M 20 236 L 20 310 L 160 310 L 195 236" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+          <path d="M 80 236 L 80 280 L 120 280 L 150 236" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+
+          <rect x="30" y="325" width="140" height="40" fill="none" stroke="#1e293b" stroke-dasharray="4 3" stroke-width="1.5"/>
+          <text x="100" y="348" fill="#1e293b" font-size="11" font-weight="bold" text-anchor="middle">TERMINAL AEREA</text>
+
+          <path d="M 190 330 L 200 330 L 197 360 L 193 360 Z" fill="#1e293b"/>
+          <rect x="188" y="323" width="14" height="7" fill="#1e293b"/>
+
+          <!-- Faro de Aeródromo -->
+          <circle id="led-beacon" cx="195" cy="315" r="7.5" fill="#a3a8ad" stroke="#1e293b" stroke-width="1.5"/>
+
+          <!-- Luces LED Taxeo Terminal (AZUL) -->
+          <circle class="led-blue" cx="20" cy="270" r="4.5"/>
+          <circle class="led-blue" cx="20" cy="300" r="4.5"/>
+          <circle class="led-blue" cx="50" cy="310" r="4.5"/>
+          <circle class="led-blue" cx="100" cy="310" r="4.5"/>
+          <circle class="led-blue" cx="150" cy="310" r="4.5"/>
+          <circle class="led-blue" cx="80" cy="260" r="4.5"/>
+          <circle class="led-blue" cx="120" cy="260" r="4.5"/>
+          <circle class="led-blue" cx="170" cy="270" r="4.5"/>
+
+          <!-- Luces Taxeo Salida Viraje 28 (AZUL) -->
+          <circle class="led-blue" cx="910" cy="260" r="4.5"/>
+          <circle class="led-blue" cx="950" cy="270" r="4.5"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- CONTROLES CON PADS DE SELECCIÓN Y MASTER INDIVIDUAL -->
+    <div class="controls-bar">
+      <!-- CIRCUITO PISTA -->
+      <div class="control-box">
+        <div class="box-label">INTENSIDAD PISTA</div>
+        <div class="individual-master">
+          <span class="master-text">MASTER:</span>
+          <div class="mini-switch" id="master-g1" onclick="toggleIndividualMaster(1)"></div>
+        </div>
+        <div class="intensity-tag" id="tag-g1">ESTADO: OFF</div>
+        <div class="pads-container">
+          <button class="pad-btn" id="pad-1-1" onclick="selectPad(1, 1)" disabled>1</button>
+          <button class="pad-btn" id="pad-1-2" onclick="selectPad(1, 2)" disabled>2</button>
+          <button class="pad-btn" id="pad-1-3" onclick="selectPad(1, 3)" disabled>3</button>
+          <button class="pad-btn" id="pad-1-4" onclick="selectPad(1, 4)" disabled>4</button>
+          <button class="pad-btn" id="pad-1-5" onclick="selectPad(1, 5)" disabled>5</button>
+        </div>
+      </div>
+
+      <!-- CIRCUITO TAXEO -->
+      <div class="control-box">
+        <div class="box-label">INTENSIDAD TAXEO</div>
+        <div class="individual-master">
+          <span class="master-text">MASTER:</span>
+          <div class="mini-switch" id="master-g2" onclick="toggleIndividualMaster(2)"></div>
+        </div>
+        <div class="intensity-tag" id="tag-g2">ESTADO: OFF</div>
+        <div class="pads-container">
+          <button class="pad-btn" id="pad-2-1" onclick="selectPad(2, 1)" disabled>1</button>
+          <button class="pad-btn" id="pad-2-2" onclick="selectPad(2, 2)" disabled>2</button>
+          <button class="pad-btn" id="pad-2-3" onclick="selectPad(2, 3)" disabled>3</button>
+          <button class="pad-btn" id="pad-2-4" onclick="selectPad(2, 4)" disabled>4</button>
+          <button class="pad-btn" id="pad-2-5" onclick="selectPad(2, 5)" disabled>5</button>
+        </div>
+      </div>
+
+      <!-- CIRCUITO PAPI -->
+      <div class="control-box">
+        <div class="box-label">INTENSIDAD PAPI</div>
+        <div class="individual-master">
+          <span class="master-text">MASTER:</span>
+          <div class="mini-switch" id="master-g3" onclick="toggleIndividualMaster(3)"></div>
+        </div>
+        <div class="intensity-tag" id="tag-papi">ESTADO: OFF</div>
+        <div class="pads-container">
+          <button class="pad-btn" id="pad-3-1" onclick="selectPad(3, 1)" disabled>1</button>
+          <button class="pad-btn" id="pad-3-2" onclick="selectPad(3, 2)" disabled>2</button>
+          <button class="pad-btn" id="pad-3-3" onclick="selectPad(3, 3)" disabled>3</button>
+          <button class="pad-btn" id="pad-3-4" onclick="selectPad(3, 4)" disabled>4</button>
+          <button class="pad-btn" id="pad-3-5" onclick="selectPad(3, 5)" disabled>5</button>
+        </div>
+      </div>
+
+      <!-- FARO DE AERÓDROMO -->
+      <div class="control-box">
+        <div class="box-label">FARO INDEPENDIENTE</div>
+        <div style="height: 30px;"></div>
+        <div class="intensity-tag" id="tag-beacon">ESTADO: APAGADO</div>
+        <div class="switch-btn" id="beaconBtn" onclick="toggleBeacon()"></div>
+      </div>
+    </div>
+
+    <!-- MÓDULO FALLAS -->
+    <div class="fault-module">
+      <div class="fault-title">Módulo de Simulación de Fallas AGL</div>
+      <div class="fault-buttons">
+        <button class="btn-danger" onclick="toggleFault(1)">Falla Pista</button>
+        <button class="btn-danger" onclick="toggleFault(2)">Falla Taxeo</button>
+        <button class="btn-danger" onclick="toggleFault(3)">Falla PAPI</button>
+        <button class="btn-secondary" onclick="clearAllFaults()">Restablecer Todo</button>
+      </div>
+    </div>
+
+    <!-- MÓDULO DE GESTIÓN GERENCIAL (EXCLUSIVO GERENTE) -->
+    <div class="manager-section manager-only">
+      <div class="manager-title">Panel de Control Gerencial (Usuarios y Sesiones)</div>
+      <div class="admin-grid">
+        <!-- Usuarios Conectados y Desconexión Fuerza -->
+        <div class="admin-card">
+          <h4>Usuarios Conectados Activos</h4>
+          <div class="log-table-container" style="max-height: 120px;">
+            <table class="log-table">
+              <thead><tr><th>Usuario</th><th>Rol</th><th>Acción</th></tr></thead>
+              <tbody id="connectedUsersBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Cambio de Contraseñas -->
+        <div class="admin-card">
+          <h4>Cambiar Contraseña de Usuario</h4>
+          <div style="display: flex; gap: 0.5rem; flex-direction: column; margin-top: 0.3rem;">
+            <select id="selUserChange" style="padding: 0.4rem; border-radius: 4px; background: #0f172a; color: white; border: 1px solid #334155;">
+              <option value="AVE">AVE (Operador Pista)</option>
+              <option value="TWR">TWR (Torre Control)</option>
+              <option value="gerente">gerente (Gerente General)</option>
+            </select>
+            <input type="password" id="newPasswordInput" placeholder="Nueva Contraseña" style="padding: 0.4rem; border-radius: 4px; background: #0f172a; color: white; border: 1px solid #334155;">
+            <button class="btn-action" style="padding: 0.4rem;" onclick="changeUserPassword()">Guardar Contraseña</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUDITORÍA -->
+    <div class="audit-section">
+      <div class="audit-title">Registro de Eventos y Auditoría</div>
+      <div class="log-table-container">
+        <table class="log-table" id="auditLogTable">
+          <thead><tr><th>Timestamp</th><th>Usuario</th><th>Acción</th><th>Nivel</th></tr></thead>
+          <tbody id="logTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const users = {
+      "gerente": { pass: "aimm2022", role: "Gerente General" },
+      "AVE": { pass: "aveaimm123", role: "Operador Pista" },
+      "TWR": { pass: "tikalterrestre", role: "Torre Control" }
+    };
+
+    let connectedUsersList = new Set();
+    let currentUser = null;
+    let socket = null;
+
+    let masterOn = { 1: false, 2: false, 3: false };
+    let stateGroup = { 1: 0, 2: 0, 3: 0 };
+    let isTransitioning = { 1: false, 2: false, 3: false };
+    let isShuttingDown = { 1: false, 2: false, 3: false };
+    
+    let beaconActive = false;
+    let faultGroup = { 1: false, 2: false, 3: false };
+    let auditLogs = [];
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initWebSocket();
+    });
+
+    function initWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${window.location.host}`);
+
+      socket.onopen = () => console.log("Conectado al Servidor Central CCR");
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'CONTROL_AGL') {
+            if (data.group <= 3) stateGroup[data.group] = data.state;
+            if (data.group === 4) beaconActive = (data.state === 1);
+            updatePanelVisuals();
+          } else if (data.type === 'KICK_USER') {
+            if (data.user === currentUser) {
+              alert("Tu sesión ha sido finalizada por el Gerente.");
+              logout();
+            }
+          } else if (data.type === 'USER_JOINED') {
+            connectedUsersList.add(data.user);
+            renderConnectedUsers();
+          } else if (data.type === 'USER_LEFT') {
+            connectedUsersList.delete(data.user);
+            renderConnectedUsers();
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      socket.onclose = () => setTimeout(initWebSocket, 3000);
+    }
+
+    function sendWebSocketCommand(group, state) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'CONTROL_AGL',
+          user: currentUser,
+          group: group,
+          state: state
+        }));
+      }
+    }
+
+    function login() {
+      const u = document.getElementById('userInput').value.trim();
+      const p = document.getElementById('passInput').value.trim();
+      if (users[u] && users[u].pass === p) {
+        currentUser = u;
+        connectedUsersList.add(u);
+        document.getElementById('loginBox').style.display = 'none';
+        document.getElementById('mimicPanel').style.display = 'block';
+        document.getElementById('currentUserDisplay').innerText = `${u} (${users[u].role})`;
+        
+        const isManager = (u === 'gerente');
+        document.querySelectorAll('.manager-only').forEach(el => el.style.display = isManager ? 'block' : 'none');
+        document.getElementById('btnExportPDF').style.display = isManager ? 'inline-block' : 'none';
+
+        addAuditLog(`Inicio de sesión de ${u}`, 'INFO');
+        renderConnectedUsers();
+        
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'USER_JOINED', user: u }));
+        }
+
+        updatePanelVisuals();
+      } else {
+        document.getElementById('errorText').style.display = 'block';
+      }
+    }
+
+    function logout() {
+      if (currentUser && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'USER_LEFT', user: currentUser }));
+      }
+      connectedUsersList.delete(currentUser);
+      currentUser = null;
+      document.getElementById('mimicPanel').style.display = 'none';
+      document.getElementById('loginBox').style.display = 'block';
+    }
+
+    function renderConnectedUsers() {
+      const tbody = document.getElementById('connectedUsersBody');
+      if (!tbody) return;
+
+      tbody.innerHTML = Array.from(connectedUsersList).map(u => {
+        const role = users[u] ? users[u].role : 'Operador';
+        const kickBtn = (u !== 'gerente') ? `<button class="btn-danger btn-sm" onclick="kickUser('${u}')">Desconectar</button>` : `<span style="color:#94a3b8;">--</span>`;
+        return `<tr><td><strong>${u}</strong></td><td>${role}</td><td>${kickBtn}</td></tr>`;
+      }).join('');
+    }
+
+    function kickUser(u) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'KICK_USER', user: u }));
+      }
+      connectedUsersList.delete(u);
+      addAuditLog(`Gerente expulsó al usuario ${u}`, 'ALARM');
+      renderConnectedUsers();
+    }
+
+    function changeUserPassword() {
+      const u = document.getElementById('selUserChange').value;
+      const newPass = document.getElementById('newPasswordInput').value.trim();
+      if (!newPass) {
+        alert("Ingresa una nueva contraseña válida");
+        return;
+      }
+      if (users[u]) {
+        users[u].pass = newPass;
+        addAuditLog(`Gerente cambió la contraseña del usuario ${u}`, 'INFO');
+        alert(`Contraseña de ${u} actualizada exitosamente.`);
+        document.getElementById('newPasswordInput').value = '';
+      }
+    }
+
+    // GENERACIÓN DE REPORTE PDF DE AUDITORÍA Y ESTADO CCR
+    function generatePDFReport() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42);
+      doc.text("AEROPUERTO SANTA ELENA - CCR & AGL REPORT", 14, 20);
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Reporte generado por: ${currentUser} (${users[currentUser].role})`, 14, 28);
+      doc.text(`Fecha y hora de generación: ${new Date().toLocaleString()}`, 14, 34);
+
+      // Estado Actual de Reguladores
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text("Estado Actual de los Circuitos CCR", 14, 44);
+
+      const statusData = [
+        ["Circuito Pista", masterOn[1] ? "ACTIVADO" : "DESACTIVADO", stateGroup[1] > 0 ? `PASO ${stateGroup[1]}` : "OFF", faultGroup[1] ? "FALLA SIMULADA" : "NORMAL"],
+        ["Circuito Taxeo", masterOn[2] ? "ACTIVADO" : "DESACTIVADO", stateGroup[2] > 0 ? `PASO ${stateGroup[2]}` : "OFF", faultGroup[2] ? "FALLA SIMULADA" : "NORMAL"],
+        ["Circuito PAPI", masterOn[3] ? "ACTIVADO" : "DESACTIVADO", stateGroup[3] > 0 ? `PASO ${stateGroup[3]}` : "OFF", faultGroup[3] ? "FALLA SIMULADA" : "NORMAL"],
+        ["Faro Aeródromo", beaconActive ? "ENCENDIDO" : "APAGADO", "-", "-"]
+      ];
+
+      doc.autoTable({
+        startY: 48,
+        head: [['Circuito', 'Master', 'Intensidad / Paso', 'Estado de Operación']],
+        body: statusData,
+        theme: 'grid',
+        headStyles: { fillStyle: 'f', fillColor: [37, 99, 235] }
+      });
+
+      // Historial de Bitácora y Auditoría
+      const logY = doc.lastAutoTable.finalY + 12;
+      doc.setFontSize(12);
+      doc.text("Registro Histórico de Auditoría de Operaciones", 14, logY);
+
+      const tableLogs = auditLogs.map(l => [l.timestamp, l.user, l.action, l.level]);
+
+      doc.autoTable({
+        startY: logY + 4,
+        head: [['Timestamp', 'Usuario', 'Acción Realizada', 'Nivel']],
+        body: tableLogs.length > 0 ? tableLogs : [['--', '--', 'Sin eventos registrados', 'INFO']],
+        theme: 'striped',
+        headStyles: { fillColor: [15, 23, 42] }
+      });
+
+      doc.save(`Reporte_CCR_SantaElena_${new Date().toISOString().slice(0,10)}.pdf`);
+      addAuditLog("Generó reporte PDF de bitácora y auditoría", "INFO");
+    }
+
+    // APAGADO GRADUAL DESDE CUALQUIER NIVEL (EJ: 5 -> 4 -> 3 -> 2 -> 1 -> OFF CON 2 SEGUNDOS DE ESPERA)
+    async function toggleIndividualMaster(group) {
+      if (isTransitioning[group] || isShuttingDown[group]) return;
+
+      const sw = document.getElementById(`master-g${group}`);
+
+      if (!masterOn[group]) {
+        masterOn[group] = true;
+        sw.classList.add('active');
+        addAuditLog(`MASTER Grupo ${group} ACTIVADO`, 'INFO');
+        updatePanelVisuals();
+      } else {
+        masterOn[group] = false;
+        sw.classList.remove('active');
+        addAuditLog(`MASTER Grupo ${group} DESACTIVADO - Bajando gradualmente a OFF`, 'INFO');
+
+        if (stateGroup[group] > 0) {
+          isShuttingDown[group] = true;
+
+          while (stateGroup[group] > 0) {
+            stateGroup[group]--;
+            sendWebSocketCommand(group, stateGroup[group]);
+            updatePanelVisuals();
+            addAuditLog(`Desacelerando Grupo ${group} -> PASO ${stateGroup[group]}`, 'INFO');
+
+            if (stateGroup[group] > 0) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }
+
+          isShuttingDown[group] = false;
+        }
+
+        updatePanelVisuals();
+      }
+    }
+
+    // CAMBIO DE PASOS MEDIANTE PADS (2 SEGUNDOS POR PASO)
+    async function selectPad(group, targetStep) {
+      if (!masterOn[group] || isTransitioning[group] || isShuttingDown[group]) return;
+
+      const currentStep = stateGroup[group];
+      if (targetStep === currentStep) return;
+
+      isTransitioning[group] = true;
+      const direction = targetStep > currentStep ? 1 : -1;
+      let step = currentStep;
+
+      while (step !== targetStep) {
+        if (!masterOn[group]) break;
+
+        step += direction;
+        stateGroup[group] = step;
+        
+        sendWebSocketCommand(group, step);
+        updatePanelVisuals();
+        addAuditLog(`Grupo ${group} -> PASO ${step}`, 'INFO');
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      isTransitioning[group] = false;
+      updatePanelVisuals();
+    }
+
+    function toggleBeacon() {
+      beaconActive = !beaconActive;
+      sendWebSocketCommand(4, beaconActive ? 1 : 0);
+      addAuditLog(`Faro de Aeródromo ${beaconActive ? 'ON' : 'OFF'}`, 'INFO');
+      updatePanelVisuals();
+    }
+
+    function toggleFault(group) {
+      faultGroup[group] = !faultGroup[group];
+      addAuditLog(`Simulación de Falla en grupo ${group}`, 'ALARM');
+      updatePanelVisuals();
+    }
+
+    function clearAllFaults() {
+      faultGroup[1] = faultGroup[2] = faultGroup[3] = false;
+      addAuditLog("Fallas restablecidas", "INFO");
+      updatePanelVisuals();
+    }
+
+    function addAuditLog(action, level = 'INFO') {
+      auditLogs.unshift({ timestamp: new Date().toLocaleTimeString(), user: currentUser || 'SISTEMA', action, level });
+      const tbody = document.getElementById('logTableBody');
+      tbody.innerHTML = auditLogs.map(l => `<tr><td>${l.timestamp}</td><td><strong>${l.user}</strong></td><td>${l.action}</td><td class="level-${l.level}">${l.level}</td></tr>`).join('');
+    }
+
+    function updatePanelVisuals() {
+      const tagIds = { 1: 'tag-g1', 2: 'tag-g2', 3: 'tag-papi' };
+
+      [1, 2, 3].forEach(g => {
+        const tag = document.getElementById(tagIds[g]);
+
+        for (let p = 1; p <= 5; p++) {
+          const padBtn = document.getElementById(`pad-${g}-${p}`);
+          if (padBtn) {
+            padBtn.disabled = !masterOn[g] || isTransitioning[g] || isShuttingDown[g];
+            if (masterOn[g] && stateGroup[g] === p) {
+              padBtn.classList.add('active');
+            } else {
+              padBtn.classList.remove('active');
+            }
+          }
+        }
+
+        if (isShuttingDown[g]) {
+          tag.innerText = `APAGANDO... (PASO ${stateGroup[g]})`;
+          tag.className = "intensity-tag transitioning-tag";
+        } else if (!masterOn[g]) {
+          tag.innerText = "MASTER OFF";
+          tag.className = "intensity-tag";
+        } else {
+          if (faultGroup[g]) {
+            tag.innerText = "¡ALARMA FALLA!";
+            tag.className = "intensity-tag";
+          } else if (isTransitioning[g]) {
+            tag.innerText = `CAMBIANDO... (PASO ${stateGroup[g]})`;
+            tag.className = "intensity-tag transitioning-tag";
+          } else {
+            tag.innerText = stateGroup[g] === 0 ? "ESTADO: EN ESPERA" : `PASO ${stateGroup[g]}`;
+            tag.className = "intensity-tag";
+          }
+        }
+      });
+
+      updateSvgMap();
+
+      document.getElementById('beaconBtn').className = `switch-btn ${beaconActive ? 'active' : ''}`;
+      document.getElementById('tag-beacon').innerText = beaconActive ? "ESTADO: ENCENDIDO" : "ESTADO: APAGADO";
+    }
+
+    function updateSvgMap() {
+      const isActivePista = (masterOn[1] && stateGroup[1] > 0) || isShuttingDown[1];
+      const orangeOpacity = faultGroup[1] ? 0.2 : (stateGroup[1] / 5);
+
+      // 1. LUCES DE PISTA (ANARANJADO)
+      const orangeLeds = document.querySelectorAll('.led-orange');
+      orangeLeds.forEach(el => {
+        el.style.opacity = isActivePista ? (orangeOpacity < 0.3 ? 0.3 : orangeOpacity) : 0.2;
+        el.style.fill = isActivePista ? "#f97316" : "#a3a8ad";
+        if (faultGroup[1]) el.classList.add('alarm-active'); else el.classList.remove('alarm-active');
+      });
+
+      // 2. LUCES FINAL DE PISTA (ENCIENDEN DIRECTO CON EL CIRCUITO DE PISTA)
+      const th11_v = document.getElementById('th11-v');
+      const th11_r = document.getElementById('th11-r');
+      const th28_r = document.getElementById('th28-r');
+      const th28_v = document.getElementById('th28-v');
+
+      if (isActivePista) {
+        const op = orangeOpacity < 0.3 ? 0.3 : orangeOpacity;
+        // Cabecera 11: Verde / Rojo
+        th11_v.style.fill = "#22c55e"; th11_v.style.opacity = op;
+        th11_r.style.fill = "#ef4444"; th11_r.style.opacity = op;
+
+        // Cabecera 28/29: Rojo / Verde
+        th28_r.style.fill = "#ef4444"; th28_r.style.opacity = op;
+        th28_v.style.fill = "#22c55e"; th28_v.style.opacity = op;
+      } else {
+        th11_v.style.fill = th11_r.style.fill = th28_r.style.fill = th28_v.style.fill = "#a3a8ad";
+        th11_v.style.opacity = th11_r.style.opacity = th28_r.style.opacity = th28_v.style.opacity = 0.2;
+      }
+
+      // 3. LUCES DE TAXEO / RODAJE (AZUL)
+      const isActiveTaxeo = (masterOn[2] && stateGroup[2] > 0) || isShuttingDown[2];
+      const blueOpacity = faultGroup[2] ? 0.2 : (stateGroup[2] / 5);
+      const blueLeds = document.querySelectorAll('.led-blue');
+      blueLeds.forEach(el => {
+        el.style.opacity = isActiveTaxeo ? (blueOpacity < 0.3 ? 0.3 : blueOpacity) : 0.2;
+        el.style.fill = isActiveTaxeo ? "#3b82f6" : "#a3a8ad";
+        if (faultGroup[2]) el.classList.add('alarm-active'); else el.classList.remove('alarm-active');
+      });
+
+      // 4. LUCES PAPI (AMARILLO)
+      const isActivePapi = (masterOn[3] && stateGroup[3] > 0) || isShuttingDown[3];
+      const papiOpacity = faultGroup[3] ? 0.2 : (stateGroup[3] / 5);
+      const papiLeds = document.querySelectorAll('.led-papi');
+      papiLeds.forEach(el => {
+        el.style.opacity = isActivePapi ? (papiOpacity < 0.3 ? 0.3 : papiOpacity) : 0.2;
+        el.style.fill = isActivePapi ? "#f59e0b" : "#a3a8ad";
+        if (isActivePapi) el.style.filter = "drop-shadow(0 0 6px #f59e0b)"; else el.style.filter = "none";
+        if (faultGroup[3]) el.classList.add('alarm-active'); else el.classList.remove('alarm-active');
+      });
+
+      // 5. FARO (PARPADEO BLANCO DE ALTO BRILLO / VERDE)
+      const beaconLed = document.getElementById('led-beacon');
+      if (beaconLed) {
+        if (beaconActive) {
+          beaconLed.classList.add('beacon-active');
+        } else {
+          beaconLed.classList.remove('beacon-active');
+          beaconLed.style.fill = "#a3a8ad";
+          beaconLed.style.opacity = 0.3;
+          beaconLed.style.filter = "none";
+        }
+      }
+    }
+  </script>
+</body>
+</html>
