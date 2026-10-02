@@ -7,27 +7,26 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
-// Servir archivos estáticos desde la carpeta 'public'
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Ruta principal para servir index.html
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Estado global AGL
+// Estado global sincronizado
 const aglState = {
-  1: { masterOn: false, state: 0, fault: false }, // Pista
-  2: { masterOn: false, state: 0, fault: false }, // Taxeo
-  3: { masterOn: false, state: 0, fault: false }, // PAPI
-  4: { beacon: false }                            // Faro
+  1: { masterOn: false, state: 0 },
+  2: { masterOn: false, state: 0 },
+  3: { masterOn: false, state: 0 },
+  4: { beacon: false }
 };
 
-wss.on('connection', (ws) => {
-  console.log("Cliente o ESP32 conectado correctamente");
+const activeUsers = new Map(); // socket -> username
 
-  // Enviar estado actual al conectar
+wss.on('connection', (ws) => {
+  // Sincronizar estado completo y lista de usuarios inmediatamente
   ws.send(JSON.stringify({ type: 'SYNC_FULL_STATE', data: aglState }));
+  broadcastUsers();
 
   ws.on('message', (message) => {
     try {
@@ -35,24 +34,42 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'CONTROL_AGL') {
         const { group, state } = data;
-
         if (group <= 3) {
           aglState[group].state = state;
-          aglState[group].masterOn = state > 0;
+          aglState[group].masterOn = (state > 0);
         } else if (group === 4) {
           aglState[4].beacon = (state === 1);
         }
-
-        // Retransmitir cambios a todos los dispositivos conectados
+        // Retransmitir a TODOS los clientes y ESP32 en vivo
         broadcast(JSON.stringify({ type: 'CONTROL_AGL', group, state, aglState }));
+      } 
+      else if (data.type === 'USER_JOINED') {
+        activeUsers.set(ws, data.user);
+        broadcastUsers();
+      } 
+      else if (data.type === 'USER_LEFT') {
+        activeUsers.delete(ws);
+        broadcastUsers();
+      } 
+      else if (data.type === 'KICK_USER') {
+        // Expulsar al usuario seleccionado
+        for (let [clientWs, username] of activeUsers.entries()) {
+          if (username === data.user) {
+            clientWs.send(JSON.stringify({ type: 'KICK_USER', user: data.user }));
+            activeUsers.delete(clientWs);
+            break;
+          }
+        }
+        broadcastUsers();
       }
     } catch (err) {
-      console.error("Error al procesar mensaje JSON:", err);
+      console.error("Error procesando mensaje:", err);
     }
   });
 
   ws.on('close', () => {
-    console.log("Cliente desconectado");
+    activeUsers.delete(ws);
+    broadcastUsers();
   });
 });
 
@@ -64,7 +81,12 @@ function broadcast(payload) {
   });
 }
 
+function broadcastUsers() {
+  const usersList = Array.from(new Set(activeUsers.values()));
+  broadcast(JSON.stringify({ type: 'SYNC_USERS', users: usersList }));
+}
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("Servidor CCR activo en puerto " + PORT);
+  console.log(`Servidor CCR activo en puerto ${PORT}`);
 });
