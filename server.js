@@ -7,8 +7,13 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
-// Servir la carpeta public
+// Servir los archivos estáticos de la carpeta public
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Ruta principal para enviar index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Estado inicial global AGL
 const aglState = {
@@ -21,7 +26,7 @@ const aglState = {
 wss.on('connection', (ws) => {
   console.log('Cliente / ESP32 conectado via WebSocket');
 
-  // Enviar estado actual al conectar
+  // Sincronizar estado al conectar
   ws.send(JSON.stringify({ type: 'SYNC_FULL_STATE', data: aglState }));
 
   ws.on('message', (message) => {
@@ -38,11 +43,11 @@ wss.on('connection', (ws) => {
           aglState[4].beacon = (state === 1);
         }
 
-        // Reenviar a TODOS los navegadores y al ESP32 conectado
+        // Transmitir a todos los clientes (navegadores y ESP32)
         broadcast(JSON.stringify(data));
       }
     } catch (err) {
-      console.error("Error al procesar mensaje JSON:", err);
+      console.error("Error al procesar JSON:", err);
     }
   });
 });
@@ -57,5 +62,5 @@ function broadcast(payload) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Servidor CCR escuchando en el puerto ${PORT}`);
+  console.log(`Servidor CCR listo en el puerto ${PORT}`);
 });
