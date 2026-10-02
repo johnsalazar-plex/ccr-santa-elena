@@ -1,7 +1,7 @@
 {
   "name": "ccr-santa-elena",
   "version": "1.0.0",
-  "description": "Servidor de Control CCR para Aeropuerto Santa Elena",
+  "description": "Sistema AGL Aeropuerto Santa Elena",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
