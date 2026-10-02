@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,151 +5,129 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CCR - Aeropuerto Santa Elena</title>
   <style>
-    * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
-    body { background-color: #0f172a; color: #f8fafc; padding: 20px; }
-    .header { background-color: #1e293b; padding: 15px 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border: 1px solid #334155; }
-    .user-badge { background-color: #0284c7; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85rem; }
-    .status-badge { padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85rem; background-color: #dc2626; }
-    .status-online { background-color: #16a34a; }
-    .title-box { text-align: center; margin-bottom: 20px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
-    .card { background-color: #1e293b; border-radius: 8px; padding: 20px; border: 1px solid #334155; text-align: center; }
-    .card h3 { color: #38bdf8; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 8px; }
-    .controls { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
-    .btn { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; transition: all 0.2s; background-color: #334155; color: white; }
-    .btn:hover { background-color: #475569; }
-    .btn-active { background-color: #0284c7; color: white; box-shadow: 0 0 10px rgba(2, 132, 199, 0.5); }
-    .btn-off { background-color: #ef4444; }
-    .btn-off:hover { background-color: #dc2626; }
-    .slider-container { margin: 15px 0; }
-    .slider { width: 100%; height: 8px; border-radius: 5px; background: #334155; outline: none; }
-    .val-display { font-size: 1.2rem; font-weight: bold; color: #f59e0b; margin-top: 5px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    body { background-color: #121824; color: #fff; padding: 20px; text-align: center; }
+    h1 { color: #38ef7d; margin-bottom: 5px; }
+    h3 { color: #8892b0; margin-bottom: 20px; }
+    .status-bar { background: #1f293d; padding: 10px; border-radius: 8px; display: inline-block; margin-bottom: 20px; }
+    .status-dot { height: 12px; width: 12px; background-color: #ff4d4d; border-radius: 50%; display: inline-block; margin-right: 8px; }
+    .status-dot.connected { background-color: #00f2fe; }
+    
+    .panel { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; width: 220px; text-align: center; }
+    .card h4 { margin-bottom: 15px; color: #f8fafc; }
+    
+    .btn { background: #334155; border: none; color: white; padding: 10px 15px; margin: 4px; border-radius: 6px; cursor: pointer; transition: 0.2s; font-weight: bold; }
+    .btn:hover { background: #475569; }
+    .btn.active { background: #10b981; color: #000; }
+    .btn.off { background: #ef4444; }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <div class="user-badge">GERENTE GENERAL</div>
-    <h2>PANEL DE CONTROL CCR / AGL</h2>
-    <div id="netStatus" class="status-badge">DESCONECTADO</div>
+  <h1>AEROPUERTO SANTA ELENA</h1>
+  <h3>PANEL MÍMICO Y CONTROL DE REGULADORES (CCR / AGL)</h3>
+
+  <div class="status-bar">
+    <span id="dot" class="status-dot"></span>
+    <span id="status-text">Desconectado</span>
   </div>
 
-  <div class="grid">
-    <!-- PISTA -->
+  <div class="panel">
+    <!-- GRUPO 1: PISTA -->
     <div class="card">
-      <h3>LUCES DE PISTA</h3>
-      <div class="slider-container">
-        <label>Nivel de Brillo (0-5)</label>
-        <input type="range" id="slider-1" class="slider" min="0" max="5" value="0" onchange="sendControl(1, parseInt(this.value))">
-        <div id="val-1" class="val-display">APAGADO</div>
-      </div>
-      <div class="controls">
-        <button class="btn btn-off" onclick="sendControl(1, 0)">APAGAR</button>
-      </div>
+      <h4>Pista (RUNWAY)</h4>
+      <button class="btn off" onclick="sendControl(1, 0)">OFF</button>
+      <button class="btn" id="g1-b1" onclick="sendControl(1, 1)">B1</button>
+      <button class="btn" id="g1-b2" onclick="sendControl(1, 2)">B2</button>
+      <button class="btn" id="g1-b3" onclick="sendControl(1, 3)">B3</button>
     </div>
 
-    <!-- TAXEO -->
+    <!-- GRUPO 2: TAXEO -->
     <div class="card">
-      <h3>LUCES DE TAXEO</h3>
-      <div class="slider-container">
-        <label>Nivel de Brillo (0-5)</label>
-        <input type="range" id="slider-2" class="slider" min="0" max="5" value="0" onchange="sendControl(2, parseInt(this.value))">
-        <div id="val-2" class="val-display">APAGADO</div>
-      </div>
-      <div class="controls">
-        <button class="btn btn-off" onclick="sendControl(2, 0)">APAGAR</button>
-      </div>
+      <h4>Taxeo (TAXIWAY)</h4>
+      <button class="btn off" onclick="sendControl(2, 0)">OFF</button>
+      <button class="btn" id="g2-b1" onclick="sendControl(2, 1)">B1</button>
+      <button class="btn" id="g2-b2" onclick="sendControl(2, 2)">B2</button>
+      <button class="btn" id="g2-b3" onclick="sendControl(2, 3)">B3</button>
     </div>
 
-    <!-- PAPI -->
+    <!-- GRUPO 3: PAPI -->
     <div class="card">
-      <h3>SISTEMA PAPI</h3>
-      <div class="slider-container">
-        <label>Nivel de Brillo (0-5)</label>
-        <input type="range" id="slider-3" class="slider" min="0" max="5" value="0" onchange="sendControl(3, parseInt(this.value))">
-        <div id="val-3" class="val-display">APAGADO</div>
-      </div>
-      <div class="controls">
-        <button class="btn btn-off" onclick="sendControl(3, 0)">APAGAR</button>
-      </div>
+      <h4>PAPI</h4>
+      <button class="btn off" onclick="sendControl(3, 0)">OFF</button>
+      <button class="btn" id="g3-b1" onclick="sendControl(3, 1)">B1</button>
+      <button class="btn" id="g3-b2" onclick="sendControl(3, 2)">B2</button>
+      <button class="btn" id="g3-b3" onclick="sendControl(3, 3)">B3</button>
     </div>
 
-    <!-- FARO -->
+    <!-- GRUPO 4: FARO -->
     <div class="card">
-      <h3>FARO AEROPORTUARIO</h3>
-      <div class="controls" style="margin-top: 30px;">
-        <button id="btn-faro-on" class="btn" onclick="sendControl(4, 1)">ENCENDER FARO</button>
-        <button id="btn-faro-off" class="btn btn-off" onclick="sendControl(4, 0)">APAGAR FARO</button>
-      </div>
-      <div id="val-4" class="val-display" style="margin-top: 20px;">APAGADO</div>
+      <h4>Faro (BEACON)</h4>
+      <button class="btn off" onclick="sendControl(4, 0)">OFF</button>
+      <button class="btn" id="g4-b1" onclick="sendControl(4, 1)">ON</button>
     </div>
   </div>
 
   <script>
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
-    let socket;
+    let ws;
 
     function connect() {
-      socket = new WebSocket(wsUrl);
+      ws = new WebSocket(wsUrl);
 
-      socket.onopen = () => {
-        const netStatus = document.getElementById('netStatus');
-        netStatus.textContent = 'EN LÍNEA';
-        netStatus.classList.add('status-online');
+      ws.onopen = () => {
+        document.getElementById('dot').classList.add('connected');
+        document.getElementById('status-text').innerText = 'Conectado en Vivo';
       };
 
-      socket.onmessage = (event) => {
+      ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'SYNC_FULL_STATE') {
-            syncFullUI(msg.data);
+            updateAllUI(msg.data);
           } else if (msg.type === 'CONTROL_AGL') {
-            updateSingleUI(msg.group, msg.state);
+            if (msg.aglState) updateAllUI(msg.aglState);
+            else updateSingleUI(msg.group, msg.state);
           }
-        } catch (e) {
-          console.error("Error al procesar mensaje:", e);
-        }
+        } catch (e) { console.error(e); }
       };
 
-      socket.onclose = () => {
-        const netStatus = document.getElementById('netStatus');
-        netStatus.textContent = 'DESCONECTADO';
-        netStatus.classList.remove('status-online');
-        setTimeout(connect, 3000);
+      ws.onclose = () => {
+        document.getElementById('dot').classList.remove('connected');
+        document.getElementById('status-text').innerText = 'Reconectando...';
+        setTimeout(connect, 2000);
       };
     }
 
     function sendControl(group, state) {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-          type: 'CONTROL_AGL',
-          group: group,
-          state: state
-        }));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'CONTROL_AGL', group: group, state: state }));
       }
     }
 
-    function syncFullUI(data) {
+    function updateAllUI(state) {
       for (let g = 1; g <= 3; g++) {
-        updateSingleUI(g, data[g].state);
+        updateSingleUI(g, state[g].state);
       }
-      updateSingleUI(4, data[4].beacon ? 1 : 0);
+      updateSingleUI(4, state[4].beacon ? 1 : 0);
     }
 
     function updateSingleUI(group, state) {
-      if (group >= 1 && group <= 3) {
-        const slider = document.getElementById(`slider-${group}`);
-        const valDisplay = document.getElementById(`val-${group}`);
-        if (slider) slider.value = state;
-        if (valDisplay) valDisplay.textContent = state === 0 ? 'APAGADO' : `NIVEL ${state}`;
+      if (group <= 3) {
+        for (let b = 1; b <= 3; b++) {
+          const btn = document.getElementById(`g${group}-b${b}`);
+          if (btn) {
+            if (b === state) btn.classList.add('active');
+            else btn.classList.remove('active');
+          }
+        }
       } else if (group === 4) {
-        const valDisplay = document.getElementById('val-4');
-        const btnOn = document.getElementById('btn-faro-on');
-        if (valDisplay) valDisplay.textContent = state === 1 ? 'ENCENDIDO' : 'APAGADO';
-        if (btnOn) {
-          if (state === 1) btnOn.classList.add('btn-active');
-          else btnOn.classList.remove('btn-active');
+        const btn = document.getElementById('g4-b1');
+        if (btn) {
+          if (state === 1) btn.classList.add('active');
+          else btn.classList.remove('active');
         }
       }
     }
@@ -159,4 +136,3 @@
   </script>
 </body>
 </html>
-```
