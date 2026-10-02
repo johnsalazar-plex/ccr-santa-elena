@@ -7,26 +7,26 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
-// Servir los archivos estáticos de la carpeta public
+// Servir la carpeta estática 'public'
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Ruta principal para enviar index.html
+// Servir siempre index.html en cualquier ruta estática
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Estado inicial global AGL
+// Estado inicial global AGL del Aeropuerto Santa Elena
 const aglState = {
-  1: { masterOn: false, state: 0, fault: false },
-  2: { masterOn: false, state: 0, fault: false },
-  3: { masterOn: false, state: 0, fault: false },
-  4: { beacon: false }
+  1: { masterOn: false, state: 0, fault: false }, // Pista
+  2: { masterOn: false, state: 0, fault: false }, // Taxeo
+  3: { masterOn: false, state: 0, fault: false }, // PAPI
+  4: { beacon: false }                            // Faro
 };
 
-wss.on('connection', (ws) => {
-  console.log('Cliente / ESP32 conectado via WebSocket');
+wss.on('connection', (ws, req) => {
+  console.log(`[WebSocket] Nuevo cliente conectado desde: ${req.socket.remoteAddress}`);
 
-  // Sincronizar estado al conectar
+  // 1. Enviar el estado actual inmediatamente al conectar
   ws.send(JSON.stringify({ type: 'SYNC_FULL_STATE', data: aglState }));
 
   ws.on('message', (message) => {
@@ -35,7 +35,7 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'CONTROL_AGL') {
         const { group, state } = data;
-        
+
         if (group <= 3) {
           aglState[group].state = state;
           aglState[group].masterOn = state > 0;
@@ -43,12 +43,16 @@ wss.on('connection', (ws) => {
           aglState[4].beacon = (state === 1);
         }
 
-        // Transmitir a todos los clientes (navegadores y ESP32)
-        broadcast(JSON.stringify(data));
+        // 2. Transmitir el nuevo estado a TODOS los clientes y al ESP32
+        broadcast(JSON.stringify({ type: 'CONTROL_AGL', group, state, aglState }));
       }
     } catch (err) {
-      console.error("Error al procesar JSON:", err);
+      console.error("[WebSocket] Error al procesar mensaje JSON:", err);
     }
+  });
+
+  ws.on('close', () => {
+    console.log('[WebSocket] Cliente desconectado');
   });
 });
 
@@ -62,5 +66,5 @@ function broadcast(payload) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Servidor CCR listo en el puerto ${PORT}`);
+  console.log(`[CCR Server] Servidor activo escuchando en puerto ${PORT}`);
 });
