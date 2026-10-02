@@ -1,4 +1,3 @@
-```javascript
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -8,25 +7,26 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
-// Servir la carpeta publica
+// Servir archivos estáticos desde la carpeta 'public'
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Ruta principal para servir index.html
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Estado inicial global AGL del Aeropuerto Santa Elena
+// Estado global AGL
 const aglState = {
-  1: { masterOn: false, state: 0, fault: false }, // Pista (0-5)
-  2: { masterOn: false, state: 0, fault: false }, // Taxeo (0-5)
-  3: { masterOn: false, state: 0, fault: false }, // PAPI (0-5)
-  4: { beacon: false }                            // Faro (0-1)
+  1: { masterOn: false, state: 0, fault: false }, // Pista
+  2: { masterOn: false, state: 0, fault: false }, // Taxeo
+  3: { masterOn: false, state: 0, fault: false }, // PAPI
+  4: { beacon: false }                            // Faro
 };
 
-wss.on('connection', (ws, req) => {
-  console.log(`[WebSocket] Nuevo cliente o ESP32 conectado`);
+wss.on('connection', (ws) => {
+  console.log("Cliente o ESP32 conectado correctamente");
 
-  // Sincronizacion inicial del estado completo al conectar
+  // Enviar estado actual al conectar
   ws.send(JSON.stringify({ type: 'SYNC_FULL_STATE', data: aglState }));
 
   ws.on('message', (message) => {
@@ -36,28 +36,23 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'CONTROL_AGL') {
         const { group, state } = data;
 
-        if (group >= 1 && group <= 3) {
+        if (group <= 3) {
           aglState[group].state = state;
           aglState[group].masterOn = state > 0;
         } else if (group === 4) {
           aglState[4].beacon = (state === 1);
         }
 
-        // Transmision masiva (broadcast) en tiempo real a todos los clientes conectados
-        broadcast(JSON.stringify({ 
-          type: 'CONTROL_AGL', 
-          group: group, 
-          state: state, 
-          aglState: aglState 
-        }));
+        // Retransmitir cambios a todos los dispositivos conectados
+        broadcast(JSON.stringify({ type: 'CONTROL_AGL', group, state, aglState }));
       }
     } catch (err) {
-      console.error("[WebSocket] Error al procesar JSON:", err);
+      console.error("Error al procesar mensaje JSON:", err);
     }
   });
 
   ws.on('close', () => {
-    console.log('[WebSocket] Cliente desconectado');
+    console.log("Cliente desconectado");
   });
 });
 
@@ -71,6 +66,5 @@ function broadcast(payload) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`[CCR Server] Servidor activo en puerto ${PORT}`);
+  console.log("Servidor CCR activo en puerto " + PORT);
 });
-```
