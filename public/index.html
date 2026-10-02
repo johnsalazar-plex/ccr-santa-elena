@@ -24,6 +24,11 @@
     .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 4px; }
     .error-text { color: #ef4444; font-size: 0.8rem; margin-top: 0.8rem; display: none; }
 
+    /* ESTILOS PARA LOGO AVE */
+    .logo-login { width: 110px; height: auto; margin-bottom: 1rem; }
+    .logo-header { width: 65px; height: auto; margin-right: 15px; }
+    .header-title-container { display: flex; align-items: center; justify-content: center; margin-bottom: 0.3rem; }
+
     .mimic-panel { display: none; background: #deddd9; border: 6px solid #8e959b; border-radius: 8px; width: 100%; max-width: 1200px; padding: 1.5rem; position: relative; box-shadow: inset 0 0 15px rgba(0,0,0,0.2); }
     .top-bar { display: flex; justify-content: space-between; align-items: center; background: #0f172a; color: white; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem; }
     .user-badge { background: #2563eb; color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
@@ -97,6 +102,7 @@
 
   <!-- LOGIN -->
   <div class="login-container" id="loginBox">
+    <img src="logo_ave.jpg" alt="Logo AVE" class="logo-login">
     <h2 style="margin-bottom: 1rem;">CCR by CNS/AVE</h2>
     <form onsubmit="event.preventDefault(); login();">
       <div class="input-group"><label>Usuario</label><input type="text" id="userInput" placeholder="Ingresa usuario" autocomplete="off"></div>
@@ -117,7 +123,10 @@
     </div>
 
     <div class="panel-header">
-      <h1>AEROPUERTO SANTA ELENA</h1>
+      <div class="header-title-container">
+        <img src="logo_ave.jpg" alt="Logo AVE" class="logo-header">
+        <h1>AEROPUERTO SANTA ELENA</h1>
+      </div>
       <h3 style="color: #475569; font-weight: 600;">PANEL MÍMICO Y CONTROL DE REGULADORES (CCR / AGL)</h3>
     </div>
 
@@ -395,37 +404,15 @@
 
     function initWebSocket() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      socket = new WebSocket(`${protocol}//${window.location.host}`);
 
       socket.onopen = () => console.log("Conectado al Servidor Central CCR");
 
       socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'SYNC_FULL_STATE' && data.data) {
-            for (let g = 1; g <= 3; g++) {
-              if (data.data[g]) {
-                stateGroup[g] = data.data[g].state;
-                masterOn[g] = data.data[g].masterOn;
-                const sw = document.getElementById(`master-g${g}`);
-                if (sw) {
-                  if (masterOn[g]) sw.classList.add('active');
-                  else sw.classList.remove('active');
-                }
-              }
-            }
-            if (data.data[4]) beaconActive = data.data[4].beacon;
-            updatePanelVisuals();
-          } else if (data.type === 'CONTROL_AGL') {
-            if (data.group <= 3) {
-              stateGroup[data.group] = data.state;
-              masterOn[data.group] = data.state > 0;
-              const sw = document.getElementById(`master-g${data.group}`);
-              if (sw) {
-                if (masterOn[data.group]) sw.classList.add('active');
-                else sw.classList.remove('active');
-              }
-            }
+          if (data.type === 'CONTROL_AGL') {
+            if (data.group <= 3) stateGroup[data.group] = data.state;
             if (data.group === 4) beaconActive = (data.state === 1);
             updatePanelVisuals();
           } else if (data.type === 'KICK_USER') {
