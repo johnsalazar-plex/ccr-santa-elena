@@ -24,7 +24,6 @@ const DEVICE_TOKEN = process.env.DEVICE_TOKEN || '';
 
 const PERSISTENT = !!process.env.DATA_DIR;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 const WS_PATH = '/ws';
@@ -46,18 +45,10 @@ const ENV_PASS = {
 };
 
 // ============================================================
-// ESTADO DEL SISTEMA AGL
+// ESTADO AGL
 // ============================================================
 
 let aglState = {
-  pista: 0,
-  taxeo: 0,
-  papi: 0,
-  faro: false
-};
-
-// Corregimos nombre internamente para evitar problemas
-aglState = {
   pista: 0,
   taxeo: 0,
   papi: 0,
@@ -69,6 +60,12 @@ aglState = {
 // ============================================================
 
 let users = {};
+
+// ============================================================
+// WEBSOCKET DEL ESP32
+// ============================================================
+
+let deviceSocket = null;
 
 // ============================================================
 // FUNCIONES AUXILIARES
@@ -84,8 +81,10 @@ function safeSend(ws, data) {
   }
 }
 
+// ------------------------------------------------------------
+// Comparación segura
+// ------------------------------------------------------------
 
-// Comparación segura de strings
 function safeEq(a, b) {
   try {
     const aa = Buffer.from(String(a || ''));
@@ -101,8 +100,10 @@ function safeEq(a, b) {
   }
 }
 
-
+// ------------------------------------------------------------
 // Hash de contraseña
+// ------------------------------------------------------------
+
 function hashPassword(password) {
   return new Promise((resolve, reject) => {
     const salt = crypto.randomBytes(16).toString('hex');
@@ -125,8 +126,10 @@ function hashPassword(password) {
   });
 }
 
-
+// ------------------------------------------------------------
 // Verificar contraseña
+// ------------------------------------------------------------
+
 function verifyPassword(password, stored) {
   return new Promise((resolve) => {
     try {
@@ -172,16 +175,13 @@ function verifyPassword(password, stored) {
   });
 }
 
-
 // ============================================================
-// CARGAR USUARIOS
+// USUARIOS
 // ============================================================
 
 function loadUsers() {
   users = {};
 
-  // Si no existe DATA_DIR, usamos solamente las variables
-  // PASS_GERENTE, PASS_AVE y PASS_TWR.
   if (!PERSISTENT) {
     console.log('[AUTH] Persistencia desactivada.');
     return;
@@ -199,9 +199,7 @@ function loadUsers() {
         fs.readFileSync(USERS_FILE, 'utf8')
       );
 
-      console.log(
-        '[AUTH] Usuarios cargados desde users.json'
-      );
+      console.log('[AUTH] Usuarios cargados desde users.json');
     }
   } catch (err) {
     console.error(
@@ -213,17 +211,12 @@ function loadUsers() {
   }
 }
 
-
-// ============================================================
-// CREAR USUARIOS DESDE VARIABLES DE RENDER
-// ============================================================
+// ------------------------------------------------------------
+// Crear usuarios desde Render
+// ------------------------------------------------------------
 
 async function initializeUsers() {
-
-  const roleNames = Object.keys(ROLES);
-
-  for (const role of roleNames) {
-
+  for (const role of Object.keys(ROLES)) {
     const envName = ENV_PASS[role];
     const password = process.env[envName];
 
@@ -245,9 +238,7 @@ async function initializeUsers() {
       console.log(
         `[AUTH] Usuario '${role}' inicializado.`
       );
-
     } catch (err) {
-
       console.error(
         `[AUTH] Error creando usuario ${role}:`,
         err.message
@@ -256,19 +247,16 @@ async function initializeUsers() {
   }
 }
 
-
-// ============================================================
-// GUARDAR USUARIOS
-// ============================================================
+// ------------------------------------------------------------
+// Guardar usuarios
+// ------------------------------------------------------------
 
 function saveUsers() {
-
   if (!PERSISTENT) {
     return;
   }
 
   try {
-
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, {
         recursive: true
@@ -280,9 +268,7 @@ function saveUsers() {
       JSON.stringify(users, null, 2),
       'utf8'
     );
-
   } catch (err) {
-
     console.error(
       '[AUTH] Error guardando usuarios:',
       err.message
@@ -290,52 +276,44 @@ function saveUsers() {
   }
 }
 
-
 // ============================================================
-// ESTADO DE DISPOSITIVOS
+// ESTADO DEL ESP32
 // ============================================================
-
-let deviceSocket = null;
 
 function isDeviceConnected() {
-
   return (
     deviceSocket &&
     deviceSocket.readyState === WebSocket.OPEN
   );
 }
 
-
 // ============================================================
-// ENVIAR ESTADO DEL ESP32
+// ENVIAR ESTADO DE CONEXIÓN A LOS NAVEGADORES
 // ============================================================
 
 function broadcastDeviceStatus() {
-
-  const connected = isDeviceConnected();
-
   broadcastToBrowsers({
     type: 'DEVICE_STATUS',
-    connected
+    connected: isDeviceConnected()
   });
 }
 
-
 // ============================================================
-// ENVIAR A TODOS LOS NAVEGADORES
+// ENVIAR MENSAJE A LOS NAVEGADORES
 // ============================================================
 
 function broadcastToBrowsers(message) {
-
   const text = JSON.stringify(message);
 
-  wss.clients.forEach((client) => {
+  if (!wss) {
+    return;
+  }
 
+  wss.clients.forEach((client) => {
     if (
       client.readyState === WebSocket.OPEN &&
       client.user
     ) {
-
       try {
         client.send(text);
       } catch (err) {
@@ -348,20 +326,44 @@ function broadcastToBrowsers(message) {
   });
 }
 
-
 // ============================================================
 // HTTP
 // ============================================================
 
 app.use(express.json());
 
+// ============================================================
+// PANEL WEB
+// ============================================================
 
-// ------------------------------------------------------------
+// IMPORTANTE:
+// Esto permite abrir:
+// https://rcc-aimm-by-ave.onrender.com
+//
+// y que Express entregue:
+// public/index.html
+
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+app.use(express.static(PUBLIC_DIR));
+
+app.get('/', (req, res) => {
+  const indexPath = path.join(PUBLIC_DIR, 'index.html');
+
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send(
+      'No se encontró public/index.html'
+    );
+  }
+});
+
+// ============================================================
 // HEALTH CHECK
-// ------------------------------------------------------------
+// ============================================================
 
 app.get('/health', (req, res) => {
-
   res.status(200).json({
     ok: true,
     service: 'CCR / AGL',
@@ -369,31 +371,25 @@ app.get('/health', (req, res) => {
     deviceConnected: isDeviceConnected(),
     time: new Date().toISOString()
   });
-
 });
 
-
-// ------------------------------------------------------------
+// ============================================================
 // ESTADO
-// ------------------------------------------------------------
+// ============================================================
 
 app.get('/api/state', (req, res) => {
-
   res.json({
     ok: true,
     data: aglState,
     deviceConnected: isDeviceConnected()
   });
-
 });
 
-
-// ------------------------------------------------------------
+// ============================================================
 // INFORMACIÓN
-// ------------------------------------------------------------
+// ============================================================
 
 app.get('/api/info', (req, res) => {
-
   res.json({
     service: 'Servidor CCR / AGL',
     websocket: WS_PATH,
@@ -402,9 +398,7 @@ app.get('/api/info', (req, res) => {
     users: Object.keys(users),
     deviceConnected: isDeviceConnected()
   });
-
 });
-
 
 // ============================================================
 // WEBSOCKET
@@ -414,27 +408,28 @@ const wss = new WebSocket.Server({
   server,
   path: WS_PATH,
 
-  // IMPORTANTE:
-  // Permitimos:
-  // - conexiones del ESP32 sin Origin
-  // - file:// para el panel abierto localmente
-  // - http://localhost
-  // - https://rcc-aimm-by-ave.onrender.com
-  // - otros orígenes HTTPS
   verifyClient: (info) => {
-
     const origin = info.origin || '';
 
     console.log(
-      `[WS] Intento de conexión. Origin: ${origin || '(sin Origin)'}`
+      `[WS] Intento de conexión. Origin: ${
+        origin || '(sin Origin)'
+      }`
     );
 
-    // ESP32 normalmente no manda Origin
+    // --------------------------------------------------------
+    // ESP32
+    // Normalmente no manda Origin
+    // --------------------------------------------------------
+
     if (!origin) {
       return true;
     }
 
-    // Panel abierto directamente desde un archivo
+    // --------------------------------------------------------
+    // Panel abierto como archivo local
+    // --------------------------------------------------------
+
     if (origin === 'file://') {
       console.log(
         '[WS] Origin file:// permitido.'
@@ -443,21 +438,29 @@ const wss = new WebSocket.Server({
       return true;
     }
 
-    // Navegación local
+    // --------------------------------------------------------
+    // Desarrollo local
+    // --------------------------------------------------------
+
     if (
       origin.startsWith('http://localhost') ||
       origin.startsWith('http://127.0.0.1')
     ) {
-
       return true;
     }
 
-    // Render / HTTPS
+    // --------------------------------------------------------
+    // HTTPS
+    // --------------------------------------------------------
+
     if (origin.startsWith('https://')) {
       return true;
     }
 
+    // --------------------------------------------------------
     // HTTP
+    // --------------------------------------------------------
+
     if (origin.startsWith('http://')) {
       return true;
     }
@@ -470,13 +473,11 @@ const wss = new WebSocket.Server({
   }
 });
 
-
 // ============================================================
 // CONEXIÓN WEBSOCKET
 // ============================================================
 
 wss.on('connection', (ws, req) => {
-
   const remoteAddress =
     req.socket?.remoteAddress || 'desconocida';
 
@@ -490,27 +491,19 @@ wss.on('connection', (ws, req) => {
   console.log(`Origin: ${origin}`);
   console.log('==========================================');
 
-
   ws.user = null;
   ws.isDevice = false;
 
-
-  // ----------------------------------------------------------
+  // ==========================================================
   // MENSAJES
-  // ----------------------------------------------------------
+  // ==========================================================
 
   ws.on('message', async (raw) => {
-
     let data;
 
     try {
-
-      data = JSON.parse(
-        raw.toString()
-      );
-
-    } catch (err) {
-
+      data = JSON.parse(raw.toString());
+    } catch {
       console.warn(
         '[WS] Mensaje JSON inválido.'
       );
@@ -523,21 +516,17 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-
     console.log(
       '[WS] Mensaje recibido:',
       data.type
     );
-
 
     // ========================================================
     // HELLO DEL ESP32
     // ========================================================
 
     if (data.type === 'HELLO') {
-
       if (ws.user || ws.isDevice) {
-
         console.warn(
           '[WS] HELLO duplicado.'
         );
@@ -545,10 +534,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      // ------------------------------------------------------
+      // Debe identificarse como ESP32
+      // ------------------------------------------------------
 
-      // Debe ser ESP32
       if (data.role !== 'ESP32') {
-
         console.warn(
           `[WS] HELLO rechazado. role=${data.role}`
         );
@@ -561,8 +551,10 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      // ------------------------------------------------------
+      // Token
+      // ------------------------------------------------------
 
-      // Verificar token
       const receivedToken =
         String(data.token || '');
 
@@ -570,9 +562,7 @@ wss.on('connection', (ws, req) => {
         `[WS] HELLO ESP32 recibido. Token length=${receivedToken.length}`
       );
 
-
       if (!DEVICE_TOKEN) {
-
         console.error(
           '[WS] DEVICE_TOKEN NO está configurado en Render.'
         );
@@ -590,14 +580,12 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-
       if (
         !safeEq(
           receivedToken,
           DEVICE_TOKEN
         )
       ) {
-
         console.warn(
           '[WS] ❌ TOKEN ESP32 INVÁLIDO'
         );
@@ -615,50 +603,49 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-
-      // ======================================================
+      // ------------------------------------------------------
       // ESP32 AUTENTICADO
-      // ======================================================
+      // ------------------------------------------------------
 
       ws.isDevice = true;
-
       deviceSocket = ws;
 
       console.log(
         '[WS] ✅ ESP32 AUTENTICADO CORRECTAMENTE'
       );
 
-
+      // ------------------------------------------------------
       // Enviar estado actual al ESP32
+      // ------------------------------------------------------
+
       safeSend(ws, {
         type: 'SYNC_FULL_STATE',
         data: aglState
       });
 
-
+      // ------------------------------------------------------
       // Avisar al panel
+      // ------------------------------------------------------
+
       broadcastDeviceStatus();
 
       return;
     }
 
-
     // ========================================================
-    // LOGIN DE USUARIO
+    // LOGIN
     // ========================================================
 
     if (data.type === 'LOGIN') {
-
       if (ws.isDevice) {
-
         safeSend(ws, {
           type: 'LOGIN_ERROR',
-          message: 'ESP32 no puede iniciar sesión como usuario'
+          message:
+            'ESP32 no puede iniciar sesión como usuario'
         });
 
         return;
       }
-
 
       const role =
         String(data.role || '');
@@ -666,39 +653,35 @@ wss.on('connection', (ws, req) => {
       const password =
         String(data.password || '');
 
-
       if (!ROLES[role]) {
-
         console.warn(
           `[AUTH] Rol desconocido: ${role}`
         );
 
         safeSend(ws, {
           type: 'LOGIN_ERROR',
-          message: 'Usuario o contraseña incorrectos'
+          message:
+            'Usuario o contraseña incorrectos'
         });
 
         return;
       }
 
-
       const user = users[role];
 
-
       if (!user) {
-
         console.warn(
           `[AUTH] Usuario ${role} no configurado`
         );
 
         safeSend(ws, {
           type: 'LOGIN_ERROR',
-          message: 'Usuario no configurado'
+          message:
+            'Usuario no configurado'
         });
 
         return;
       }
-
 
       const valid =
         await verifyPassword(
@@ -706,33 +689,32 @@ wss.on('connection', (ws, req) => {
           user.passwordHash
         );
 
-
       if (!valid) {
-
         console.warn(
           `[AUTH] ❌ Login rechazado para ${role}`
         );
 
         safeSend(ws, {
           type: 'LOGIN_ERROR',
-          message: 'Usuario o contraseña incorrectos'
+          message:
+            'Usuario o contraseña incorrectos'
         });
 
         return;
       }
 
-
+      // ------------------------------------------------------
       // Login correcto
+      // ------------------------------------------------------
+
       ws.user = {
         role,
         name: ROLES[role]
       };
 
-
       console.log(
         `[AUTH] ✅ Usuario conectado: ${role}`
       );
-
 
       safeSend(ws, {
         type: 'LOGIN_OK',
@@ -744,20 +726,15 @@ wss.on('connection', (ws, req) => {
         deviceConnected: isDeviceConnected()
       });
 
-
       return;
     }
-
 
     // ========================================================
     // CONTROL AGL
     // ========================================================
 
     if (data.type === 'CONTROL_AGL') {
-
-      // Solo usuarios autenticados
       if (!ws.user) {
-
         console.warn(
           '[WS] CONTROL_AGL rechazado: usuario no autenticado.'
         );
@@ -770,17 +747,16 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-
       const control =
-        data.data || data.state || {};
-
+        data.data ||
+        data.state ||
+        {};
 
       // ------------------------------------------------------
       // PISTA
       // ------------------------------------------------------
 
       if (control.pista !== undefined) {
-
         const value =
           Number(control.pista);
 
@@ -789,18 +765,16 @@ wss.on('connection', (ws, req) => {
           value >= 0 &&
           value <= 5
         ) {
-
-          aglState.pista = Math.round(value);
+          aglState.pista =
+            Math.round(value);
         }
       }
-
 
       // ------------------------------------------------------
       // TAXEO
       // ------------------------------------------------------
 
       if (control.taxeo !== undefined) {
-
         const value =
           Number(control.taxeo);
 
@@ -809,18 +783,16 @@ wss.on('connection', (ws, req) => {
           value >= 0 &&
           value <= 5
         ) {
-
-          aglState.taxeo = Math.round(value);
+          aglState.taxeo =
+            Math.round(value);
         }
       }
-
 
       // ------------------------------------------------------
       // PAPI
       // ------------------------------------------------------
 
       if (control.papi !== undefined) {
-
         const value =
           Number(control.papi);
 
@@ -829,35 +801,30 @@ wss.on('connection', (ws, req) => {
           value >= 0 &&
           value <= 5
         ) {
-
-          aglState.papi = Math.round(value);
+          aglState.papi =
+            Math.round(value);
         }
       }
-
 
       // ------------------------------------------------------
       // FARO
       // ------------------------------------------------------
 
       if (control.faro !== undefined) {
-
         aglState.faro =
           Boolean(control.faro);
       }
-
 
       console.log(
         `[AGL] Cambio por ${ws.user.role}:`,
         aglState
       );
 
-
       // ------------------------------------------------------
-      // ENVIAR AL ESP32
+      // Enviar al ESP32
       // ------------------------------------------------------
 
       if (isDeviceConnected()) {
-
         safeSend(deviceSocket, {
           type: 'CONTROL_AGL',
           data: aglState
@@ -866,52 +833,46 @@ wss.on('connection', (ws, req) => {
         console.log(
           '[AGL] Estado enviado al ESP32.'
         );
-
       } else {
-
         console.warn(
           '[AGL] ESP32 desconectado. Estado guardado en servidor.'
         );
       }
 
-
       // ------------------------------------------------------
-      // ACTUALIZAR TODOS LOS NAVEGADORES
+      // Actualizar navegadores
       // ------------------------------------------------------
 
       broadcastToBrowsers({
         type: 'STATE_UPDATE',
         data: aglState,
-        deviceConnected: isDeviceConnected()
+        deviceConnected:
+          isDeviceConnected()
       });
-
 
       return;
     }
-
 
     // ========================================================
     // SOLICITAR ESTADO
     // ========================================================
 
     if (data.type === 'GET_STATE') {
-
       safeSend(ws, {
         type: 'STATE_UPDATE',
         data: aglState,
-        deviceConnected: isDeviceConnected()
+        deviceConnected:
+          isDeviceConnected()
       });
 
       return;
     }
-
 
     // ========================================================
     // PING
     // ========================================================
 
     if (data.type === 'PING') {
-
       safeSend(ws, {
         type: 'PONG',
         time: Date.now()
@@ -919,7 +880,6 @@ wss.on('connection', (ws, req) => {
 
       return;
     }
-
 
     // ========================================================
     // MENSAJE DESCONOCIDO
@@ -931,27 +891,26 @@ wss.on('connection', (ws, req) => {
 
     safeSend(ws, {
       type: 'ERROR',
-      message: `Tipo de mensaje desconocido: ${data.type}`
+      message:
+        `Tipo de mensaje desconocido: ${data.type}`
     });
-
   });
 
-
-  // ----------------------------------------------------------
+  // ==========================================================
   // CIERRE
-  // ----------------------------------------------------------
+  // ==========================================================
 
   ws.on('close', (code, reason) => {
-
     console.log('');
     console.log(
       `[WS] Conexión cerrada. code=${code} reason=${reason || ''}`
     );
 
+    // --------------------------------------------------------
+    // ESP32
+    // --------------------------------------------------------
 
-    // Si era el ESP32
     if (ws.isDevice) {
-
       if (deviceSocket === ws) {
         deviceSocket = null;
       }
@@ -963,77 +922,65 @@ wss.on('connection', (ws, req) => {
       broadcastDeviceStatus();
     }
 
+    // --------------------------------------------------------
+    // Usuario
+    // --------------------------------------------------------
 
-    // Si era usuario
     if (ws.user) {
-
       console.log(
         `[AUTH] Usuario desconectado: ${ws.user.role}`
       );
     }
-
   });
 
-
-  // ----------------------------------------------------------
+  // ==========================================================
   // ERROR
-  // ----------------------------------------------------------
+  // ==========================================================
 
   ws.on('error', (err) => {
-
     console.error(
       '[WS] Error:',
       err.message
     );
-
   });
 
-
-  // ----------------------------------------------------------
+  // ==========================================================
   // MENSAJE INICIAL
-  // ----------------------------------------------------------
+  // ==========================================================
 
   safeSend(ws, {
     type: 'SERVER_READY',
     websocket: WS_PATH,
     time: Date.now()
   });
-
 });
-
 
 // ============================================================
 // ERROR DEL SERVIDOR WEBSOCKET
 // ============================================================
 
 wss.on('error', (err) => {
-
   console.error(
     '[WS] Error del servidor:',
     err.message
   );
-
 });
 
-
 // ============================================================
-// INICIO
+// INICIAR SERVIDOR
 // ============================================================
 
 async function startServer() {
-
   console.log('');
   console.log('==========================================');
   console.log('        SERVIDOR CCR / AGL');
   console.log('==========================================');
-
 
   loadUsers();
 
   await initializeUsers();
 
   saveUsers();
-
 
   console.log('');
   console.log(
@@ -1045,86 +992,104 @@ async function startServer() {
   );
 
   console.log(
-    `DEVICE_TOKEN configurado: ${DEVICE_TOKEN ? 'SI' : 'NO'}`
+    `DEVICE_TOKEN configurado: ${
+      DEVICE_TOKEN ? 'SI' : 'NO'
+    }`
   );
 
   console.log(
-    `Persistencia: ${PERSISTENT ? 'SI' : 'NO'}`
+    `Persistencia: ${
+      PERSISTENT ? 'SI' : 'NO'
+    }`
   );
 
   console.log(
-    `Usuarios configurados: ${Object.keys(users).join(', ') || 'ninguno'}`
+    `Usuarios configurados: ${
+      Object.keys(users).join(', ') || 'ninguno'
+    }`
+  );
+
+  console.log(
+    `Panel web: ${
+      fs.existsSync(
+        path.join(PUBLIC_DIR, 'index.html')
+      )
+        ? 'OK'
+        : 'NO ENCONTRADO'
+    }`
   );
 
   console.log('');
   console.log('==========================================');
 
-
   server.listen(
     PORT,
     '0.0.0.0',
     () => {
-
       console.log(
         `[HTTP] Escuchando en 0.0.0.0:${PORT}`
       );
-
     }
   );
 }
-
 
 // ============================================================
 // ARRANCAR
 // ============================================================
 
 startServer().catch((err) => {
-
   console.error(
     '[FATAL] No se pudo iniciar el servidor:',
     err
   );
 
   process.exit(1);
-
 });
 
-
 // ============================================================
-// MANEJO DE CIERRE
+// CIERRE RENDER
 // ============================================================
 
 process.on('SIGTERM', () => {
-
   console.log(
     '[SERVER] SIGTERM recibido. Cerrando...'
   );
 
-  server.close(() => {
+  if (deviceSocket) {
+    try {
+      deviceSocket.close();
+    } catch {}
+  }
 
+  server.close(() => {
     console.log(
       '[SERVER] Servidor cerrado.'
     );
 
     process.exit(0);
   });
-
 });
 
+// ============================================================
+// CIERRE MANUAL
+// ============================================================
 
 process.on('SIGINT', () => {
-
   console.log(
     '[SERVER] SIGINT recibido. Cerrando...'
   );
 
-  server.close(() => {
+  if (deviceSocket) {
+    try {
+      deviceSocket.close();
+    } catch {}
+  }
 
+  server.close(() => {
     console.log(
       '[SERVER] Servidor cerrado.'
     );
 
     process.exit(0);
   });
-
 });
