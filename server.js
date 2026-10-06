@@ -51,7 +51,7 @@ const ENV_PASS = {
 
 let aglState = {
   pista: 0,
-  taxe o: 0,
+  taxeo: 0,
   papi: 0,
   faro: false
 };
