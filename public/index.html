@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CCR - Aeropuerto Santa Elena</title>
+  <title>RCC - Aeropuerto Santa Elena</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
 
@@ -97,11 +97,11 @@
 
   <!-- LOGIN -->
   <div class="login-container" id="loginBox">
-    <h2 style="margin-bottom: 1rem;">CCR by CNS/AVE</h2>
+    <h2 style="margin-bottom: 1rem;">RCC by AVE</h2>
     <form onsubmit="event.preventDefault(); login();">
-      <div class="input-group"><label>Usuario</label><input type="text" id="userInput" placeholder="Ingresa usuario" autocomplete="off"></div>
+      <div class="input-group"><label>Usuario</label><input type="text" id="userInput" placeholder="Ingresa usuario DGAC" autocomplete="off"></div>
       <div class="input-group"><label>Contraseña</label><input type="password" id="passInput" placeholder="••••••••"></div>
-      <button type="submit" class="btn-action">INGRESAR AL SISTEMA</button>
+      <button type="submit" class="btn-action">INGRESAR AL SISTEMA by AVE</button>
     </form>
     <div class="error-text" id="errorText">Usuario o contraseña incorrectos o sesión cerrada por el Gerente</div>
   </div>
@@ -117,8 +117,8 @@
     </div>
 
     <div class="panel-header">
-      <h1>AEROPUERTO SANTA ELENA</h1>
-      <h3 style="color: #475569; font-weight: 600;">PANEL MÍMICO Y CONTROL DE REGULADORES (CCR / AGL)</h3>
+      <h1>AIMM</h1>
+      <h3 style="color: #475569; font-weight: 600;">REGULADOR DE CORRIENTE CONTINUA (RCC)</h3>
     </div>
 
     <!-- MAPA SVG INTERACTIVO -->
@@ -251,9 +251,9 @@
     <!-- CONTROLES CON PADS DE SELECCIÓN Y MASTER INDIVIDUAL -->
     <div class="controls-bar">
       <div class="control-box">
-        <div class="box-label">INTENSIDAD PISTA</div>
+        <div class="box-label">PISTA</div>
         <div class="individual-master">
-          <span class="master-text">MASTER:</span>
+          <span class="master-text">OFF LOCK:</span>
           <div class="mini-switch" id="master-g1" onclick="toggleIndividualMaster(1)"></div>
         </div>
         <div class="intensity-tag" id="tag-g1">ESTADO: OFF</div>
@@ -267,9 +267,9 @@
       </div>
 
       <div class="control-box">
-        <div class="box-label">INTENSIDAD TAXEO</div>
+        <div class="box-label">TAXEO/RODAJE</div>
         <div class="individual-master">
-          <span class="master-text">MASTER:</span>
+          <span class="master-text">OFF LOCK:</span>
           <div class="mini-switch" id="master-g2" onclick="toggleIndividualMaster(2)"></div>
         </div>
         <div class="intensity-tag" id="tag-g2">ESTADO: OFF</div>
@@ -283,9 +283,9 @@
       </div>
 
       <div class="control-box">
-        <div class="box-label">INTENSIDAD PAPI</div>
+        <div class="box-label">PAPI</div>
         <div class="individual-master">
-          <span class="master-text">MASTER:</span>
+          <span class="master-text">OFF LOCK:</span>
           <div class="mini-switch" id="master-g3" onclick="toggleIndividualMaster(3)"></div>
         </div>
         <div class="intensity-tag" id="tag-papi">ESTADO: OFF</div>
@@ -300,7 +300,7 @@
 
       <!-- FARO DE AERÓDROMO -->
       <div class="control-box">
-        <div class="box-label">FARO INDEPENDIENTE</div>
+        <div class="box-label">FARO</div>
         <div style="height: 30px;"></div>
         <div class="intensity-tag" id="tag-beacon">ESTADO: APAGADO</div>
         <div class="switch-btn" id="beaconBtn" onclick="toggleBeacon()"></div>
