@@ -1,14 +1,18 @@
-'use strict';
+// ============================================================
+// SERVIDOR CCR / AGL
+// ESP32 <-> WebSocket <-> Panel Web
+// Compatible con Render
+// ============================================================
 
 const express = require('express');
 const http = require('http');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
 const WebSocket = require('ws');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // ============================================================
-// CONFIGURACIÓN GENERAL
+// CONFIGURACIÓN
 // ============================================================
 
 const app = express();
@@ -19,13 +23,11 @@ const PORT = process.env.PORT || 3000;
 const DEVICE_TOKEN = process.env.DEVICE_TOKEN || '';
 
 const PERSISTENT = !!process.env.DATA_DIR;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
-const DATA_DIR =
-  process.env.DATA_DIR ||
-  path.join(__dirname, 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
-const USERS_FILE =
-  path.join(DATA_DIR, 'users.json');
+const WS_PATH = '/ws';
 
 // ============================================================
 // ROLES
@@ -44,28 +46,18 @@ const ENV_PASS = {
 };
 
 // ============================================================
-// EXPRESS
+// ESTADO DEL SISTEMA AGL
 // ============================================================
 
-app.use(express.json({
-  limit: '1mb'
-}));
+let aglState = {
+  pista: 0,
+  taxe o: 0,
+  papi: 0,
+  faro: false
+};
 
-app.use(express.urlencoded({
-  extended: true
-}));
-
-// ============================================================
-// ESTADO AGL
-// ============================================================
-//
-// 0 = apagado
-// 1..5 = niveles de iluminación
-//
-// Estos nombres deben coincidir con el ESP32.
-// ============================================================
-
-const aglState = {
+// Corregimos nombre internamente para evitar problemas
+aglState = {
   pista: 0,
   taxeo: 0,
   papi: 0,
@@ -73,91 +65,46 @@ const aglState = {
 };
 
 // ============================================================
-// ESTADO DEL ESP32
+// USUARIOS
 // ============================================================
 
-let deviceSocket = null;
-
-let deviceConnected = false;
-
-let deviceLastSeen = null;
+let users = {};
 
 // ============================================================
-// SESIONES WEB
+// FUNCIONES AUXILIARES
 // ============================================================
 
-const sessions = new Map();
-
-// ============================================================
-// CONTROL DE INTENTOS DE LOGIN
-// ============================================================
-
-const loginAttempts = new Map();
-
-const LOGIN_WINDOW_MS = 10 * 60 * 1000;
-
-const MAX_LOGIN_ATTEMPTS = 8;
-
-// ============================================================
-// FUNCIONES GENERALES
-// ============================================================
-
-function safeSend(ws, object) {
-
-  if (!ws) return false;
-
-  if (ws.readyState !== WebSocket.OPEN) {
-    return false;
-  }
-
+function safeSend(ws, data) {
   try {
-
-    ws.send(JSON.stringify(object));
-
-    return true;
-
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(data));
+    }
   } catch (err) {
-
-    console.error(
-      '[WS] Error enviando mensaje:',
-      err.message
-    );
-
-    return false;
+    console.error('[WS] Error enviando mensaje:', err.message);
   }
 }
 
-// ============================================================
-// COMPARACIÓN SEGURA
-// ============================================================
 
+// Comparación segura de strings
 function safeEq(a, b) {
+  try {
+    const aa = Buffer.from(String(a || ''));
+    const bb = Buffer.from(String(b || ''));
 
-  const aa = Buffer.from(
-    String(a || ''),
-    'utf8'
-  );
+    if (aa.length !== bb.length) {
+      return false;
+    }
 
-  const bb = Buffer.from(
-    String(b || ''),
-    'utf8'
-  );
-
-  if (aa.length !== bb.length) {
+    return crypto.timingSafeEqual(aa, bb);
+  } catch {
     return false;
   }
-
-  return crypto.timingSafeEqual(aa, bb);
 }
 
-// ============================================================
-// HASH DE CONTRASEÑAS
-// ============================================================
 
+// Hash de contraseña
 function hashPassword(password) {
-
   return new Promise((resolve, reject) => {
-
     const salt = crypto.randomBytes(16).toString('hex');
 
     crypto.scrypt(
@@ -165,7 +112,6 @@ function hashPassword(password) {
       salt,
       64,
       (err, derivedKey) => {
-
         if (err) {
           reject(err);
           return;
@@ -179,191 +125,109 @@ function hashPassword(password) {
   });
 }
 
-// ============================================================
-// VERIFICAR CONTRASEÑA
-// ============================================================
 
+// Verificar contraseña
 function verifyPassword(password, stored) {
-
   return new Promise((resolve) => {
-
     try {
+      if (!stored || !stored.startsWith('scrypt:')) {
+        resolve(false);
+        return;
+      }
 
-      const parts = String(stored || '').split(':');
+      const parts = stored.split(':');
 
-      if (
-        parts.length !== 3 ||
-        parts[0] !== 'scrypt'
-      ) {
+      if (parts.length !== 3) {
         resolve(false);
         return;
       }
 
       const salt = parts[1];
-
-      const expected = Buffer.from(
-        parts[2],
-        'hex'
-      );
+      const storedHex = parts[2];
 
       crypto.scrypt(
         String(password),
         salt,
-        expected.length,
+        64,
         (err, derivedKey) => {
-
           if (err) {
             resolve(false);
             return;
           }
 
-          if (
-            derivedKey.length !==
-            expected.length
-          ) {
+          const a = Buffer.from(storedHex, 'hex');
+          const b = derivedKey;
+
+          if (a.length !== b.length) {
             resolve(false);
             return;
           }
 
-          resolve(
-            crypto.timingSafeEqual(
-              derivedKey,
-              expected
-            )
-          );
+          resolve(crypto.timingSafeEqual(a, b));
         }
       );
-
-    } catch (err) {
-
+    } catch {
       resolve(false);
     }
   });
 }
 
-// ============================================================
-// CREAR DATA DIR
-// ============================================================
-
-function ensureDataDir() {
-
-  if (!PERSISTENT) {
-    return;
-  }
-
-  try {
-
-    fs.mkdirSync(
-      DATA_DIR,
-      {
-        recursive: true
-      }
-    );
-
-  } catch (err) {
-
-    console.error(
-      '[DATA] No se pudo crear DATA_DIR:',
-      err.message
-    );
-  }
-}
-
-// ============================================================
-// GUARDAR USUARIOS
-// ============================================================
-
-function saveUsers(users) {
-
-  if (!PERSISTENT) {
-    return;
-  }
-
-  try {
-
-    ensureDataDir();
-
-    fs.writeFileSync(
-      USERS_FILE,
-      JSON.stringify(
-        users,
-        null,
-        2
-      ),
-      'utf8'
-    );
-
-  } catch (err) {
-
-    console.error(
-      '[DATA] Error guardando usuarios:',
-      err.message
-    );
-  }
-}
 
 // ============================================================
 // CARGAR USUARIOS
 // ============================================================
 
 function loadUsers() {
+  users = {};
 
+  // Si no existe DATA_DIR, usamos solamente las variables
+  // PASS_GERENTE, PASS_AVE y PASS_TWR.
   if (!PERSISTENT) {
-    return {};
+    console.log('[AUTH] Persistencia desactivada.');
+    return;
   }
 
   try {
-
-    if (!fs.existsSync(USERS_FILE)) {
-      return {};
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, {
+        recursive: true
+      });
     }
 
-    const raw =
-      fs.readFileSync(
-        USERS_FILE,
-        'utf8'
+    if (fs.existsSync(USERS_FILE)) {
+      users = JSON.parse(
+        fs.readFileSync(USERS_FILE, 'utf8')
       );
 
-    const parsed =
-      JSON.parse(raw);
-
-    if (
-      !parsed ||
-      typeof parsed !== 'object'
-    ) {
-      return {};
+      console.log(
+        '[AUTH] Usuarios cargados desde users.json'
+      );
     }
-
-    return parsed;
-
   } catch (err) {
-
     console.error(
-      '[DATA] Error leyendo users.json:',
+      '[AUTH] Error leyendo users.json:',
       err.message
     );
 
-    return {};
+    users = {};
   }
 }
 
-let users = loadUsers();
 
 // ============================================================
-// INICIALIZAR USUARIOS DESDE VARIABLES DE RENDER
+// CREAR USUARIOS DESDE VARIABLES DE RENDER
 // ============================================================
 
 async function initializeUsers() {
 
-  for (const role of Object.keys(ROLES)) {
+  const roleNames = Object.keys(ROLES);
+
+  for (const role of roleNames) {
 
     const envName = ENV_PASS[role];
-
-    const password =
-      process.env[envName];
+    const password = process.env[envName];
 
     if (!password) {
-
       console.warn(
         `[AVISO] Falta la variable ${envName}: "${role}" no podrá iniciar sesión.`
       );
@@ -371,1812 +235,896 @@ async function initializeUsers() {
       continue;
     }
 
-    if (
-      typeof password !== 'string' ||
-      password.length < 1
-    ) {
-      continue;
-    }
-
-    // Si no existe el usuario, se crea.
-    if (!users[role]) {
-
+    try {
       users[role] = {
-        username: role,
-        role: role,
-        displayName: ROLES[role],
-        passwordHash:
-          await hashPassword(password),
-        createdAt:
-          new Date().toISOString()
+        role,
+        name: ROLES[role],
+        passwordHash: await hashPassword(password)
       };
 
       console.log(
-        `[AUTH] Usuario "${role}" inicializado.`
+        `[AUTH] Usuario '${role}' inicializado.`
       );
 
+    } catch (err) {
+
+      console.error(
+        `[AUTH] Error creando usuario ${role}:`,
+        err.message
+      );
     }
   }
-
-  saveUsers(users);
 }
+
 
 // ============================================================
-// SESIONES
+// GUARDAR USUARIOS
 // ============================================================
 
-function createSession(username, role) {
+function saveUsers() {
 
-  const sessionId =
-    crypto.randomBytes(32).toString('hex');
-
-  const session = {
-    sessionId,
-    username,
-    role,
-    createdAt: Date.now(),
-    lastSeen: Date.now()
-  };
-
-  sessions.set(
-    sessionId,
-    session
-  );
-
-  return session;
-}
-
-function getSession(sessionId) {
-
-  if (!sessionId) {
-    return null;
-  }
-
-  const session =
-    sessions.get(sessionId);
-
-  if (!session) {
-    return null;
-  }
-
-  session.lastSeen = Date.now();
-
-  return session;
-}
-
-function destroySession(sessionId) {
-
-  if (!sessionId) {
+  if (!PERSISTENT) {
     return;
   }
 
-  sessions.delete(sessionId);
+  try {
+
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, {
+        recursive: true
+      });
+    }
+
+    fs.writeFileSync(
+      USERS_FILE,
+      JSON.stringify(users, null, 2),
+      'utf8'
+    );
+
+  } catch (err) {
+
+    console.error(
+      '[AUTH] Error guardando usuarios:',
+      err.message
+    );
+  }
 }
 
-// ============================================================
-// LIMPIAR SESIONES ANTIGUAS
-// ============================================================
-
-setInterval(() => {
-
-  const maxAge =
-    24 * 60 * 60 * 1000;
-
-  const now = Date.now();
-
-  for (const [
-    sessionId,
-    session
-  ] of sessions.entries()) {
-
-    if (
-      now - session.lastSeen >
-      maxAge
-    ) {
-
-      sessions.delete(
-        sessionId
-      );
-    }
-  }
-
-}, 60 * 60 * 1000);
 
 // ============================================================
-// LOGIN RATE LIMIT
+// ESTADO DE DISPOSITIVOS
 // ============================================================
 
-function loginAllowed(ip) {
+let deviceSocket = null;
 
-  const now = Date.now();
-
-  const item =
-    loginAttempts.get(ip);
-
-  if (!item) {
-    return true;
-  }
-
-  if (
-    now - item.firstAttempt >
-    LOGIN_WINDOW_MS
-  ) {
-
-    loginAttempts.delete(ip);
-
-    return true;
-  }
+function isDeviceConnected() {
 
   return (
-    item.count <
-    MAX_LOGIN_ATTEMPTS
+    deviceSocket &&
+    deviceSocket.readyState === WebSocket.OPEN
   );
 }
 
-function registerFailedLogin(ip) {
-
-  const now = Date.now();
-
-  let item =
-    loginAttempts.get(ip);
-
-  if (!item) {
-
-    item = {
-      firstAttempt: now,
-      count: 0
-    };
-  }
-
-  item.count++;
-
-  loginAttempts.set(
-    ip,
-    item
-  );
-}
-
-function clearLoginAttempts(ip) {
-
-  loginAttempts.delete(ip);
-}
 
 // ============================================================
-// INFO PÚBLICA DEL SISTEMA
-// ============================================================
-
-function getDeviceStatus() {
-
-  return {
-    connected:
-      deviceConnected,
-
-    lastSeen:
-      deviceLastSeen
-  };
-}
-
-// ============================================================
-// ENVIAR ESTADO DEL ESP32 A LOS NAVEGADORES
+// ENVIAR ESTADO DEL ESP32
 // ============================================================
 
 function broadcastDeviceStatus() {
 
-  const message = {
+  const connected = isDeviceConnected();
 
+  broadcastToBrowsers({
     type: 'DEVICE_STATUS',
+    connected
+  });
+}
 
-    data: getDeviceStatus()
-  };
 
-  for (const client of wss.clients) {
+// ============================================================
+// ENVIAR A TODOS LOS NAVEGADORES
+// ============================================================
+
+function broadcastToBrowsers(message) {
+
+  const text = JSON.stringify(message);
+
+  wss.clients.forEach((client) => {
 
     if (
-      client.user &&
-      client.readyState ===
-        WebSocket.OPEN
+      client.readyState === WebSocket.OPEN &&
+      client.user
     ) {
-
-      safeSend(
-        client,
-        message
-      );
-    }
-  }
-}
-
-// ============================================================
-// ENVIAR ESTADO AGL A UN CLIENTE
-// ============================================================
-
-function sendFullState(ws) {
-
-  safeSend(
-    ws,
-    {
-      type: 'SYNC_FULL_STATE',
-      data: {
-        ...aglState
-      }
-    }
-  );
-}
-
-// ============================================================
-// ENVIAR ESTADO A TODOS LOS USUARIOS
-// ============================================================
-
-function broadcastAGLState() {
-
-  const message = {
-
-    type: 'AGL_STATE',
-
-    data: {
-      ...aglState
-    }
-  };
-
-  for (const client of wss.clients) {
-
-    if (
-      client.user &&
-      client.readyState ===
-        WebSocket.OPEN
-    ) {
-
-      safeSend(
-        client,
-        message
-      );
-    }
-  }
-}
-
-// ============================================================
-// ENVIAR CONTROL AL ESP32
-// ============================================================
-
-function sendControlToDevice() {
-
-  if (
-    !deviceSocket ||
-    deviceSocket.readyState !==
-      WebSocket.OPEN
-  ) {
-
-    console.warn(
-      '[AGL] No se puede enviar al ESP32: dispositivo desconectado.'
-    );
-
-    return false;
-  }
-
-  const message = {
-
-    type: 'CONTROL_AGL',
-
-    data: {
-      ...aglState
-    }
-  };
-
-  const ok =
-    safeSend(
-      deviceSocket,
-      message
-    );
-
-  if (ok) {
-
-    console.log(
-      '[AGL] CONTROL_AGL enviado al ESP32:',
-      JSON.stringify(
-        aglState
-      )
-    );
-  }
-
-  return ok;
-}
-
-// ============================================================
-// ACTUALIZAR AGL
-// ============================================================
-
-function updateAGL(data) {
-
-  if (
-    !data ||
-    typeof data !== 'object'
-  ) {
-    return false;
-  }
-
-  // ----------------------------------------------------------
-  // PISTA
-  // ----------------------------------------------------------
-
-  if (
-    data.pista !== undefined
-  ) {
-
-    const value =
-      Number(data.pista);
-
-    if (
-      Number.isInteger(value) &&
-      value >= 0 &&
-      value <= 5
-    ) {
-
-      aglState.pista = value;
-    }
-  }
-
-  // ----------------------------------------------------------
-  // TAXEO
-  // ----------------------------------------------------------
-
-  if (
-    data.taxeo !== undefined
-  ) {
-
-    const value =
-      Number(data.taxeo);
-
-    if (
-      Number.isInteger(value) &&
-      value >= 0 &&
-      value <= 5
-    ) {
-
-      aglState.taxeo = value;
-    }
-  }
-
-  // ----------------------------------------------------------
-  // PAPI
-  // ----------------------------------------------------------
-
-  if (
-    data.papi !== undefined
-  ) {
-
-    const value =
-      Number(data.papi);
-
-    if (
-      Number.isInteger(value) &&
-      value >= 0 &&
-      value <= 5
-    ) {
-
-      aglState.papi = value;
-    }
-  }
-
-  // ----------------------------------------------------------
-  // FARO
-  // ----------------------------------------------------------
-
-  if (
-    data.faro !== undefined
-  ) {
-
-    if (
-      data.faro === true ||
-      data.faro === false
-    ) {
-
-      aglState.faro =
-        data.faro;
-    }
-  }
-
-  return true;
-}
-
-// ============================================================
-// VALIDAR PERMISOS
-// ============================================================
-
-function canControlAGL(role) {
-
-  return (
-    role === 'gerente' ||
-    role === 'AVE' ||
-    role === 'TWR'
-  );
-}
-
-// ============================================================
-// EXPRESS HEALTH
-// ============================================================
-
-app.get(
-  '/health',
-  (req, res) => {
-
-    res.json({
-      ok: true,
-      service: 'CCR',
-      device:
-        getDeviceStatus(),
-      time:
-        new Date().toISOString()
-    });
-  }
-);
-
-// ============================================================
-// ESTADO PÚBLICO
-// ============================================================
-
-app.get(
-  '/api/status',
-  (req, res) => {
-
-    res.json({
-
-      ok: true,
-
-      device:
-        getDeviceStatus(),
-
-      agl: {
-        ...aglState
-      }
-    });
-  }
-);
-
-// ============================================================
-// ARCHIVOS DEL FRONTEND
-// ============================================================
-
-const PUBLIC_DIR =
-  path.join(
-    __dirname,
-    'public'
-  );
-
-if (fs.existsSync(PUBLIC_DIR)) {
-
-  app.use(
-    express.static(
-      PUBLIC_DIR
-    )
-  );
-}
-
-// ============================================================
-// WEBSOCKET SERVER
-// ============================================================
-
-const wss =
-  new WebSocket.Server({
-
-    server,
-
-    path: '/ws',
-
-    // --------------------------------------------------------
-    // VALIDACIÓN DEL ORIGIN
-    // --------------------------------------------------------
-
-    verifyClient: (
-      info,
-      done
-    ) => {
-
-      const origin =
-        info.origin || '';
-
-      // ESP32 normalmente no manda Origin.
-      if (!origin) {
-
-        done(true);
-
-        return;
-      }
 
       try {
-
-        const url =
-          new URL(origin);
-
-        const host =
-          url.hostname;
-
-        const requestHost =
-          String(
-            info.req.headers.host ||
-            ''
-          ).split(':')[0];
-
-        if (
-          host ===
-          requestHost
-        ) {
-
-          done(true);
-
-          return;
-        }
-
-        // Render puede poner el host público.
-        if (
-          host.endsWith(
-            '.onrender.com'
-          )
-        ) {
-
-          done(true);
-
-          return;
-        }
-
-        console.warn(
-          '[WS] Origin rechazado:',
-          origin
-        );
-
-        done(false, 403, 'Origin no permitido');
-
+        client.send(text);
       } catch (err) {
-
-        console.warn(
-          '[WS] Origin inválido:',
-          origin
+        console.error(
+          '[WS] Error enviando a navegador:',
+          err.message
         );
-
-        done(false, 403, 'Origin inválido');
       }
     }
   });
+}
+
+
+// ============================================================
+// HTTP
+// ============================================================
+
+app.use(express.json());
+
+
+// ------------------------------------------------------------
+// HEALTH CHECK
+// ------------------------------------------------------------
+
+app.get('/health', (req, res) => {
+
+  res.status(200).json({
+    ok: true,
+    service: 'CCR / AGL',
+    websocket: WS_PATH,
+    deviceConnected: isDeviceConnected(),
+    time: new Date().toISOString()
+  });
+
+});
+
+
+// ------------------------------------------------------------
+// ESTADO
+// ------------------------------------------------------------
+
+app.get('/api/state', (req, res) => {
+
+  res.json({
+    ok: true,
+    data: aglState,
+    deviceConnected: isDeviceConnected()
+  });
+
+});
+
+
+// ------------------------------------------------------------
+// INFORMACIÓN
+// ------------------------------------------------------------
+
+app.get('/api/info', (req, res) => {
+
+  res.json({
+    service: 'Servidor CCR / AGL',
+    websocket: WS_PATH,
+    deviceTokenConfigured: !!DEVICE_TOKEN,
+    persistent: PERSISTENT,
+    users: Object.keys(users),
+    deviceConnected: isDeviceConnected()
+  });
+
+});
+
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+const wss = new WebSocket.Server({
+  server,
+  path: WS_PATH,
+
+  // IMPORTANTE:
+  // Permitimos:
+  // - conexiones del ESP32 sin Origin
+  // - file:// para el panel abierto localmente
+  // - http://localhost
+  // - https://rcc-aimm-by-ave.onrender.com
+  // - otros orígenes HTTPS
+  verifyClient: (info) => {
+
+    const origin = info.origin || '';
+
+    console.log(
+      `[WS] Intento de conexión. Origin: ${origin || '(sin Origin)'}`
+    );
+
+    // ESP32 normalmente no manda Origin
+    if (!origin) {
+      return true;
+    }
+
+    // Panel abierto directamente desde un archivo
+    if (origin === 'file://') {
+      console.log(
+        '[WS] Origin file:// permitido.'
+      );
+
+      return true;
+    }
+
+    // Navegación local
+    if (
+      origin.startsWith('http://localhost') ||
+      origin.startsWith('http://127.0.0.1')
+    ) {
+
+      return true;
+    }
+
+    // Render / HTTPS
+    if (origin.startsWith('https://')) {
+      return true;
+    }
+
+    // HTTP
+    if (origin.startsWith('http://')) {
+      return true;
+    }
+
+    console.warn(
+      `[WS] Origin rechazado: ${origin}`
+    );
+
+    return false;
+  }
+});
+
 
 // ============================================================
 // CONEXIÓN WEBSOCKET
 // ============================================================
 
-wss.on(
-  'connection',
-  (ws, req) => {
+wss.on('connection', (ws, req) => {
 
-    const remoteAddress =
-      req.socket?.remoteAddress ||
-      'desconocida';
+  const remoteAddress =
+    req.socket?.remoteAddress || 'desconocida';
 
-    console.log();
+  const origin =
+    req.headers.origin || '(sin Origin)';
+
+  console.log('');
+  console.log('==========================================');
+  console.log('[WS] NUEVA CONEXIÓN');
+  console.log(`IP: ${remoteAddress}`);
+  console.log(`Origin: ${origin}`);
+  console.log('==========================================');
+
+
+  ws.user = null;
+  ws.isDevice = false;
+
+
+  // ----------------------------------------------------------
+  // MENSAJES
+  // ----------------------------------------------------------
+
+  ws.on('message', async (raw) => {
+
+    let data;
+
+    try {
+
+      data = JSON.parse(
+        raw.toString()
+      );
+
+    } catch (err) {
+
+      console.warn(
+        '[WS] Mensaje JSON inválido.'
+      );
+
+      safeSend(ws, {
+        type: 'ERROR',
+        message: 'JSON inválido'
+      });
+
+      return;
+    }
+
+
     console.log(
-      '[WS] ========================================'
+      '[WS] Mensaje recibido:',
+      data.type
     );
 
-    console.log(
-      '[WS] NUEVA CONEXIÓN WEBSOCKET'
-    );
 
-    console.log(
-      '[WS] IP:',
-      remoteAddress
-    );
+    // ========================================================
+    // HELLO DEL ESP32
+    // ========================================================
 
-    console.log(
-      '[WS] URL:',
-      req.url
-    );
+    if (data.type === 'HELLO') {
 
-    console.log(
-      '[WS] User-Agent:',
-      req.headers['user-agent'] ||
-      '(ninguno)'
-    );
-
-    console.log(
-      '[WS] Origin:',
-      req.headers.origin ||
-      '(ninguno)'
-    );
-
-    console.log(
-      '[WS] ========================================'
-    );
-
-    ws.user = null;
-    ws.isDevice = false;
-
-    // --------------------------------------------------------
-    // MENSAJES
-    // --------------------------------------------------------
-
-    ws.on(
-      'message',
-      async (raw) => {
-
-        let data;
-
-        try {
-
-          data =
-            JSON.parse(
-              raw.toString()
-            );
-
-        } catch (err) {
-
-          console.warn(
-            '[WS] Mensaje recibido no es JSON.'
-          );
-
-          safeSend(
-            ws,
-            {
-              type: 'ERROR',
-              message: 'JSON inválido'
-            }
-          );
-
-          return;
-        }
-
-        if (
-          !data ||
-          typeof data !== 'object'
-        ) {
-
-          return;
-        }
-
-        const type =
-          data.type;
-
-        console.log(
-          '[WS] Mensaje:',
-          type || '(sin type)'
-        );
-
-        // ====================================================
-        // HELLO DEL ESP32
-        // ====================================================
-
-        if (type === 'HELLO') {
-
-          console.log(
-            '[WS] HELLO recibido.'
-          );
-
-          console.log(
-            '[WS] Role:',
-            data.role || '(sin role)'
-          );
-
-          console.log(
-            '[WS] Token recibido:',
-            data.token
-              ? 'SI'
-              : 'NO'
-          );
-
-          console.log(
-            '[WS] Longitud token recibido:',
-            String(
-              data.token || ''
-            ).length
-          );
-
-          // ----------------------------------------------
-          // Debe ser ESP32
-          // ----------------------------------------------
-
-          if (
-            ws.user ||
-            data.role !== 'ESP32'
-          ) {
-
-            console.warn(
-              '[WS] HELLO rechazado: role incorrecto o socket ya autenticado.'
-            );
-
-            ws.close(
-              4003,
-              'role inválido'
-            );
-
-            return;
-          }
-
-          // ----------------------------------------------
-          // Verificar que exista DEVICE_TOKEN
-          // ----------------------------------------------
-
-          if (!DEVICE_TOKEN) {
-
-            console.error(
-              '[WS] ❌ DEVICE_TOKEN NO está configurado en Render.'
-            );
-
-            ws.close(
-              4001,
-              'device token no configurado'
-            );
-
-            return;
-          }
-
-          // ----------------------------------------------
-          // Comparar token
-          // ----------------------------------------------
-
-          const tokenOK =
-            safeEq(
-              data.token || '',
-              DEVICE_TOKEN
-            );
-
-          if (!tokenOK) {
-
-            console.warn(
-              '[WS] ❌ TOKEN DEL ESP32 INVÁLIDO.'
-            );
-
-            // IMPORTANTE:
-            // Nunca imprimimos el token real.
-
-            ws.close(
-              4001,
-              'token invalido'
-            );
-
-            return;
-          }
-
-          // ----------------------------------------------
-          // ESP32 AUTENTICADO
-          // ----------------------------------------------
-
-          console.log(
-            '[WS] ✅ TOKEN DEL ESP32 VÁLIDO.'
-          );
-
-          // Si había otro ESP32 conectado,
-          // cerramos el anterior.
-
-          if (
-            deviceSocket &&
-            deviceSocket !== ws
-          ) {
-
-            console.warn(
-              '[WS] Ya había un ESP32 conectado. Cerrando conexión anterior.'
-            );
-
-            try {
-
-              deviceSocket.close(
-                4000,
-                'reemplazado'
-              );
-
-            } catch (_) {}
-          }
-
-          deviceSocket = ws;
-
-          ws.isDevice = true;
-
-          deviceConnected = true;
-
-          deviceLastSeen =
-            new Date().toISOString();
-
-          console.log(
-            '[WS] ========================================'
-          );
-
-          console.log(
-            '[WS] ✅ ESP32 AUTENTICADO Y CONECTADO'
-          );
-
-          console.log(
-            '[WS] ========================================'
-          );
-
-          // ----------------------------------------------
-          // Enviar estado completo
-          // ----------------------------------------------
-
-          safeSend(
-            ws,
-            {
-              type:
-                'SYNC_FULL_STATE',
-
-              data: {
-                ...aglState
-              }
-            }
-          );
-
-          console.log(
-            '[WS] SYNC_FULL_STATE enviado al ESP32.'
-          );
-
-          broadcastDeviceStatus();
-
-          return;
-        }
-
-        // ====================================================
-        // PING
-        // ====================================================
-
-        if (type === 'PING') {
-
-          if (ws.isDevice) {
-
-            deviceLastSeen =
-              new Date().toISOString();
-          }
-
-          safeSend(
-            ws,
-            {
-              type: 'PONG'
-            }
-          );
-
-          return;
-        }
-
-        // ====================================================
-        // LOGIN
-        // ====================================================
-
-        if (type === 'LOGIN') {
-
-          const ip =
-            remoteAddress;
-
-          if (
-            !loginAllowed(ip)
-          ) {
-
-            console.warn(
-              '[AUTH] Demasiados intentos de login desde:',
-              ip
-            );
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'LOGIN_FAIL',
-
-                message:
-                  'Demasiados intentos. Espere unos minutos.'
-              }
-            );
-
-            return;
-          }
-
-          const username =
-            String(
-              data.username ||
-              data.user ||
-              ''
-            ).trim();
-
-          const password =
-            String(
-              data.password ||
-              ''
-            );
-
-          console.log(
-            '[AUTH] Intento de login:',
-            username || '(vacío)'
-          );
-
-          // --------------------------------------------------
-          // Usuario válido
-          // --------------------------------------------------
-
-          const account =
-            users[username];
-
-          if (
-            !account ||
-            !ROLES[username]
-          ) {
-
-            registerFailedLogin(ip);
-
-            console.warn(
-              '[AUTH] Usuario no válido.'
-            );
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'LOGIN_FAIL',
-
-                message:
-                  'Usuario o contraseña incorrectos.'
-              }
-            );
-
-            return;
-          }
-
-          // --------------------------------------------------
-          // Verificar password
-          // --------------------------------------------------
-
-          const passwordOK =
-            await verifyPassword(
-              password,
-              account.passwordHash
-            );
-
-          if (!passwordOK) {
-
-            registerFailedLogin(ip);
-
-            console.warn(
-              '[AUTH] Contraseña incorrecta para:',
-              username
-            );
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'LOGIN_FAIL',
-
-                message:
-                  'Usuario o contraseña incorrectos.'
-              }
-            );
-
-            return;
-          }
-
-          // --------------------------------------------------
-          // LOGIN CORRECTO
-          // --------------------------------------------------
-
-          clearLoginAttempts(ip);
-
-          const session =
-            createSession(
-              username,
-              account.role
-            );
-
-          ws.user = {
-            username,
-            role:
-              account.role,
-            sessionId:
-              session.sessionId
-          };
-
-          console.log(
-            '[AUTH] ✅ Login correcto:',
-            username,
-            '(' +
-              ROLES[
-                account.role
-              ] +
-              ')'
-          );
-
-          safeSend(
-            ws,
-            {
-              type:
-                'LOGIN_OK',
-
-              user: {
-                username,
-                role:
-                  account.role,
-
-                displayName:
-                  ROLES[
-                    account.role
-                  ]
-              },
-
-              sessionId:
-                session.sessionId,
-
-              device:
-                getDeviceStatus(),
-
-              agl: {
-                ...aglState
-              }
-            }
-          );
-
-          // También mandamos el formato
-          // de sincronización que usa el sistema.
-
-          sendFullState(ws);
-
-          return;
-        }
-
-        // ====================================================
-        // RESUME
-        // ====================================================
-
-        if (type === 'RESUME') {
-
-          const sessionId =
-            String(
-              data.sessionId ||
-              data.token ||
-              ''
-            );
-
-          const session =
-            getSession(
-              sessionId
-            );
-
-          if (!session) {
-
-            console.warn(
-              '[AUTH] RESUME rechazado.'
-            );
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'RESUME_FAIL',
-
-                message:
-                  'Sesión inválida o expirada.'
-              }
-            );
-
-            return;
-          }
-
-          ws.user = {
-            username:
-              session.username,
-
-            role:
-              session.role,
-
-            sessionId:
-              session.sessionId
-          };
-
-          console.log(
-            '[AUTH] Sesión restaurada:',
-            session.username
-          );
-
-          safeSend(
-            ws,
-            {
-              type:
-                'RESUME_OK',
-
-              user: {
-                username:
-                  session.username,
-
-                role:
-                  session.role,
-
-                displayName:
-                  ROLES[
-                    session.role
-                  ]
-              },
-
-              sessionId:
-                session.sessionId,
-
-              device:
-                getDeviceStatus(),
-
-              agl: {
-                ...aglState
-              }
-            }
-          );
-
-          sendFullState(ws);
-
-          return;
-        }
-
-        // ====================================================
-        // LOGOUT
-        // ====================================================
-
-        if (type === 'LOGOUT') {
-
-          if (ws.user) {
-
-            console.log(
-              '[AUTH] Logout:',
-              ws.user.username
-            );
-
-            destroySession(
-              ws.user.sessionId
-            );
-
-            ws.user = null;
-          }
-
-          safeSend(
-            ws,
-            {
-              type:
-                'LOGOUT_OK'
-            }
-          );
-
-          return;
-        }
-
-        // ====================================================
-        // CONTROL AGL
-        // ====================================================
-
-        if (type === 'CONTROL_AGL') {
-
-          if (
-            !ws.user
-          ) {
-
-            console.warn(
-              '[AGL] CONTROL_AGL rechazado: usuario no autenticado.'
-            );
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'ERROR',
-
-                message:
-                  'No autenticado.'
-              }
-            );
-
-            return;
-          }
-
-          if (
-            !canControlAGL(
-              ws.user.role
-            )
-          ) {
-
-            console.warn(
-              '[AGL] CONTROL_AGL rechazado: sin permisos.'
-            );
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'ERROR',
-
-                message:
-                  'Sin permisos para controlar AGL.'
-              }
-            );
-
-            return;
-          }
-
-          let incoming =
-            data.data;
-
-          if (
-            !incoming ||
-            typeof incoming !==
-              'object'
-          ) {
-
-            incoming = data;
-          }
-
-          updateAGL(
-            incoming
-          );
-
-          console.log(
-            '[AGL] Cambio realizado por:',
-            ws.user.username
-          );
-
-          console.log(
-            '[AGL] Estado:',
-            JSON.stringify(
-              aglState
-            )
-          );
-
-          // ------------------------------------------------
-          // Enviar al ESP32
-          // ------------------------------------------------
-
-          sendControlToDevice();
-
-          // ------------------------------------------------
-          // Informar a navegadores
-          // ------------------------------------------------
-
-          broadcastAGLState();
-
-          // ------------------------------------------------
-          // Confirmación
-          // ------------------------------------------------
-
-          safeSend(
-            ws,
-            {
-              type:
-                'CONTROL_AGL_OK',
-
-              data: {
-                ...aglState
-              }
-            }
-          );
-
-          return;
-        }
-
-        // ====================================================
-        // SOLICITAR ESTADO
-        // ====================================================
-
-        if (
-          type === 'GET_STATE' ||
-          type === 'SYNC_REQUEST'
-        ) {
-
-          if (!ws.user) {
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'ERROR',
-
-                message:
-                  'No autenticado.'
-              }
-            );
-
-            return;
-          }
-
-          safeSend(
-            ws,
-            {
-              type:
-                'SYNC_FULL_STATE',
-
-              data: {
-                ...aglState
-              }
-            }
-          );
-
-          safeSend(
-            ws,
-            {
-              type:
-                'DEVICE_STATUS',
-
-              data:
-                getDeviceStatus()
-            }
-          );
-
-          return;
-        }
-
-        // ====================================================
-        // KICK USER
-        // ====================================================
-
-        if (
-          type === 'KICK_USER'
-        ) {
-
-          if (
-            !ws.user ||
-            ws.user.role !==
-              'gerente'
-          ) {
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'ERROR',
-
-                message:
-                  'Solo Gerente General puede expulsar usuarios.'
-              }
-            );
-
-            return;
-          }
-
-          const target =
-            String(
-              data.username ||
-              data.user ||
-              ''
-            ).trim();
-
-          if (!target) {
-
-            return;
-          }
-
-          for (
-            const client
-            of wss.clients
-          ) {
-
-            if (
-              client.user &&
-              client.user.username ===
-                target
-            ) {
-
-              safeSend(
-                client,
-                {
-                  type:
-                    'KICKED',
-
-                  message:
-                    'Sesión cerrada por el administrador.'
-                }
-              );
-
-              destroySession(
-                client.user.sessionId
-              );
-
-              try {
-
-                client.close(
-                  4005,
-                  'kicked'
-                );
-
-              } catch (_) {}
-            }
-          }
-
-          console.log(
-            '[AUTH] Usuario expulsado:',
-            target
-          );
-
-          return;
-        }
-
-        // ====================================================
-        // CHANGE PASSWORD
-        // ====================================================
-
-        if (
-          type ===
-          'CHANGE_PASSWORD'
-        ) {
-
-          if (!ws.user) {
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'ERROR',
-
-                message:
-                  'No autenticado.'
-              }
-            );
-
-            return;
-          }
-
-          const username =
-            ws.user.username;
-
-          const currentPassword =
-            String(
-              data.currentPassword ||
-              ''
-            );
-
-          const newPassword =
-            String(
-              data.newPassword ||
-              ''
-            );
-
-          if (
-            newPassword.length <
-            8
-          ) {
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'PASSWORD_FAIL',
-
-                message:
-                  'La nueva contraseña debe tener al menos 8 caracteres.'
-              }
-            );
-
-            return;
-          }
-
-          const account =
-            users[username];
-
-          if (!account) {
-
-            return;
-          }
-
-          const currentOK =
-            await verifyPassword(
-              currentPassword,
-              account.passwordHash
-            );
-
-          if (!currentOK) {
-
-            safeSend(
-              ws,
-              {
-                type:
-                  'PASSWORD_FAIL',
-
-                message:
-                  'Contraseña actual incorrecta.'
-              }
-            );
-
-            return;
-          }
-
-          account.passwordHash =
-            await hashPassword(
-              newPassword
-            );
-
-          account.updatedAt =
-            new Date().toISOString();
-
-          saveUsers(users);
-
-          console.log(
-            '[AUTH] Contraseña cambiada:',
-            username
-          );
-
-          safeSend(
-            ws,
-            {
-              type:
-                'PASSWORD_OK'
-            }
-          );
-
-          return;
-        }
-
-        // ====================================================
-        // MENSAJE DESCONOCIDO
-        // ====================================================
+      if (ws.user || ws.isDevice) {
 
         console.warn(
-          '[WS] Tipo de mensaje no reconocido:',
-          type
+          '[WS] HELLO duplicado.'
         );
 
-        safeSend(
-          ws,
-          {
-            type:
-              'ERROR',
-
-            message:
-              'Tipo de mensaje no reconocido.'
-          }
-        );
+        return;
       }
-    );
 
-    // ========================================================
-    // CERRAR CONEXIÓN
-    // ========================================================
 
-    ws.on(
-      'close',
-      (code, reason) => {
+      // Debe ser ESP32
+      if (data.role !== 'ESP32') {
 
-        console.log();
-        console.log(
-          '[WS] ----------------------------------------'
+        console.warn(
+          `[WS] HELLO rechazado. role=${data.role}`
         );
 
-        console.log(
-          '[WS] CONEXIÓN CERRADA'
-        );
-
-        console.log(
-          '[WS] Código:',
-          code
-        );
-
-        console.log(
-          '[WS] Razón:',
-          reason
-            ? reason.toString()
-            : '(ninguna)'
-        );
-
-        if (ws.isDevice) {
-
-          if (
-            deviceSocket === ws
-          ) {
-
-            deviceSocket =
-              null;
-
-            deviceConnected =
-              false;
-
-            deviceLastSeen =
-              new Date().toISOString();
-
-            console.log(
-              '[WS] ❌ ESP32 desconectado.'
-            );
-
-            broadcastDeviceStatus();
-          }
-        }
-
-        if (ws.user) {
-
-          console.log(
-            '[WS] Usuario desconectado:',
-            ws.user.username
-          );
-        }
-
-        console.log(
-          '[WS] ----------------------------------------'
-        );
-        console.log();
-      }
-    );
-
-    // ========================================================
-    // ERROR
-    // ========================================================
-
-    ws.on(
-      'error',
-      (err) => {
-
-        console.error(
-          '[WS] ❌ ERROR:',
-          err.message
-        );
-
-        if (ws.isDevice) {
-
-          console.error(
-            '[WS] El error corresponde al ESP32.'
-          );
-        }
-      }
-    );
-
-    // ========================================================
-    // PING/PONG DEL SOCKET
-    // ========================================================
-
-    ws.on(
-      'pong',
-      () => {
-
-        if (ws.isDevice) {
-
-          deviceLastSeen =
-            new Date().toISOString();
-        }
-      }
-    );
-  }
-);
-
-// ============================================================
-// DETECTAR ERROR DEL WEBSOCKET SERVER
-// ============================================================
-
-wss.on(
-  'error',
-  (err) => {
-
-    console.error(
-      '[WSS SERVER] ❌ ERROR:',
-      err.message
-    );
-  }
-);
-
-// ============================================================
-// FALLBACK FRONTEND
-// ============================================================
-
-if (
-  fs.existsSync(
-    path.join(
-      PUBLIC_DIR,
-      'index.html'
-    )
-  )
-) {
-
-  app.get(
-    '*',
-    (req, res) => {
-
-      // No interferir con API.
-      if (
-        req.path.startsWith(
-          '/api/'
-        ) ||
-        req.path ===
-          '/health'
-      ) {
-
-        res.status(404).json({
-          ok: false,
-          error: 'Not found'
+        safeSend(ws, {
+          type: 'ERROR',
+          message: 'Rol inválido'
         });
 
         return;
       }
 
-      res.sendFile(
-        path.join(
-          PUBLIC_DIR,
-          'index.html'
+
+      // Verificar token
+      const receivedToken =
+        String(data.token || '');
+
+      console.log(
+        `[WS] HELLO ESP32 recibido. Token length=${receivedToken.length}`
+      );
+
+
+      if (!DEVICE_TOKEN) {
+
+        console.error(
+          '[WS] DEVICE_TOKEN NO está configurado en Render.'
+        );
+
+        safeSend(ws, {
+          type: 'ERROR',
+          message: 'DEVICE_TOKEN no configurado'
+        });
+
+        ws.close(
+          4001,
+          'token no configurado'
+        );
+
+        return;
+      }
+
+
+      if (
+        !safeEq(
+          receivedToken,
+          DEVICE_TOKEN
         )
+      ) {
+
+        console.warn(
+          '[WS] ❌ TOKEN ESP32 INVÁLIDO'
+        );
+
+        safeSend(ws, {
+          type: 'ERROR',
+          message: 'Token inválido'
+        });
+
+        ws.close(
+          4001,
+          'token invalido'
+        );
+
+        return;
+      }
+
+
+      // ======================================================
+      // ESP32 AUTENTICADO
+      // ======================================================
+
+      ws.isDevice = true;
+
+      deviceSocket = ws;
+
+      console.log(
+        '[WS] ✅ ESP32 AUTENTICADO CORRECTAMENTE'
+      );
+
+
+      // Enviar estado actual al ESP32
+      safeSend(ws, {
+        type: 'SYNC_FULL_STATE',
+        data: aglState
+      });
+
+
+      // Avisar al panel
+      broadcastDeviceStatus();
+
+      return;
+    }
+
+
+    // ========================================================
+    // LOGIN DE USUARIO
+    // ========================================================
+
+    if (data.type === 'LOGIN') {
+
+      if (ws.isDevice) {
+
+        safeSend(ws, {
+          type: 'LOGIN_ERROR',
+          message: 'ESP32 no puede iniciar sesión como usuario'
+        });
+
+        return;
+      }
+
+
+      const role =
+        String(data.role || '');
+
+      const password =
+        String(data.password || '');
+
+
+      if (!ROLES[role]) {
+
+        console.warn(
+          `[AUTH] Rol desconocido: ${role}`
+        );
+
+        safeSend(ws, {
+          type: 'LOGIN_ERROR',
+          message: 'Usuario o contraseña incorrectos'
+        });
+
+        return;
+      }
+
+
+      const user = users[role];
+
+
+      if (!user) {
+
+        console.warn(
+          `[AUTH] Usuario ${role} no configurado`
+        );
+
+        safeSend(ws, {
+          type: 'LOGIN_ERROR',
+          message: 'Usuario no configurado'
+        });
+
+        return;
+      }
+
+
+      const valid =
+        await verifyPassword(
+          password,
+          user.passwordHash
+        );
+
+
+      if (!valid) {
+
+        console.warn(
+          `[AUTH] ❌ Login rechazado para ${role}`
+        );
+
+        safeSend(ws, {
+          type: 'LOGIN_ERROR',
+          message: 'Usuario o contraseña incorrectos'
+        });
+
+        return;
+      }
+
+
+      // Login correcto
+      ws.user = {
+        role,
+        name: ROLES[role]
+      };
+
+
+      console.log(
+        `[AUTH] ✅ Usuario conectado: ${role}`
+      );
+
+
+      safeSend(ws, {
+        type: 'LOGIN_OK',
+        user: {
+          role,
+          name: ROLES[role]
+        },
+        data: aglState,
+        deviceConnected: isDeviceConnected()
+      });
+
+
+      return;
+    }
+
+
+    // ========================================================
+    // CONTROL AGL
+    // ========================================================
+
+    if (data.type === 'CONTROL_AGL') {
+
+      // Solo usuarios autenticados
+      if (!ws.user) {
+
+        console.warn(
+          '[WS] CONTROL_AGL rechazado: usuario no autenticado.'
+        );
+
+        safeSend(ws, {
+          type: 'ERROR',
+          message: 'No autenticado'
+        });
+
+        return;
+      }
+
+
+      const control =
+        data.data || data.state || {};
+
+
+      // ------------------------------------------------------
+      // PISTA
+      // ------------------------------------------------------
+
+      if (control.pista !== undefined) {
+
+        const value =
+          Number(control.pista);
+
+        if (
+          Number.isFinite(value) &&
+          value >= 0 &&
+          value <= 5
+        ) {
+
+          aglState.pista = Math.round(value);
+        }
+      }
+
+
+      // ------------------------------------------------------
+      // TAXEO
+      // ------------------------------------------------------
+
+      if (control.taxeo !== undefined) {
+
+        const value =
+          Number(control.taxeo);
+
+        if (
+          Number.isFinite(value) &&
+          value >= 0 &&
+          value <= 5
+        ) {
+
+          aglState.taxeo = Math.round(value);
+        }
+      }
+
+
+      // ------------------------------------------------------
+      // PAPI
+      // ------------------------------------------------------
+
+      if (control.papi !== undefined) {
+
+        const value =
+          Number(control.papi);
+
+        if (
+          Number.isFinite(value) &&
+          value >= 0 &&
+          value <= 5
+        ) {
+
+          aglState.papi = Math.round(value);
+        }
+      }
+
+
+      // ------------------------------------------------------
+      // FARO
+      // ------------------------------------------------------
+
+      if (control.faro !== undefined) {
+
+        aglState.faro =
+          Boolean(control.faro);
+      }
+
+
+      console.log(
+        `[AGL] Cambio por ${ws.user.role}:`,
+        aglState
+      );
+
+
+      // ------------------------------------------------------
+      // ENVIAR AL ESP32
+      // ------------------------------------------------------
+
+      if (isDeviceConnected()) {
+
+        safeSend(deviceSocket, {
+          type: 'CONTROL_AGL',
+          data: aglState
+        });
+
+        console.log(
+          '[AGL] Estado enviado al ESP32.'
+        );
+
+      } else {
+
+        console.warn(
+          '[AGL] ESP32 desconectado. Estado guardado en servidor.'
+        );
+      }
+
+
+      // ------------------------------------------------------
+      // ACTUALIZAR TODOS LOS NAVEGADORES
+      // ------------------------------------------------------
+
+      broadcastToBrowsers({
+        type: 'STATE_UPDATE',
+        data: aglState,
+        deviceConnected: isDeviceConnected()
+      });
+
+
+      return;
+    }
+
+
+    // ========================================================
+    // SOLICITAR ESTADO
+    // ========================================================
+
+    if (data.type === 'GET_STATE') {
+
+      safeSend(ws, {
+        type: 'STATE_UPDATE',
+        data: aglState,
+        deviceConnected: isDeviceConnected()
+      });
+
+      return;
+    }
+
+
+    // ========================================================
+    // PING
+    // ========================================================
+
+    if (data.type === 'PING') {
+
+      safeSend(ws, {
+        type: 'PONG',
+        time: Date.now()
+      });
+
+      return;
+    }
+
+
+    // ========================================================
+    // MENSAJE DESCONOCIDO
+    // ========================================================
+
+    console.warn(
+      `[WS] Tipo de mensaje desconocido: ${data.type}`
+    );
+
+    safeSend(ws, {
+      type: 'ERROR',
+      message: `Tipo de mensaje desconocido: ${data.type}`
+    });
+
+  });
+
+
+  // ----------------------------------------------------------
+  // CIERRE
+  // ----------------------------------------------------------
+
+  ws.on('close', (code, reason) => {
+
+    console.log('');
+    console.log(
+      `[WS] Conexión cerrada. code=${code} reason=${reason || ''}`
+    );
+
+
+    // Si era el ESP32
+    if (ws.isDevice) {
+
+      if (deviceSocket === ws) {
+        deviceSocket = null;
+      }
+
+      console.log(
+        '[WS] ❌ ESP32 desconectado.'
+      );
+
+      broadcastDeviceStatus();
+    }
+
+
+    // Si era usuario
+    if (ws.user) {
+
+      console.log(
+        `[AUTH] Usuario desconectado: ${ws.user.role}`
       );
     }
+
+  });
+
+
+  // ----------------------------------------------------------
+  // ERROR
+  // ----------------------------------------------------------
+
+  ws.on('error', (err) => {
+
+    console.error(
+      '[WS] Error:',
+      err.message
+    );
+
+  });
+
+
+  // ----------------------------------------------------------
+  // MENSAJE INICIAL
+  // ----------------------------------------------------------
+
+  safeSend(ws, {
+    type: 'SERVER_READY',
+    websocket: WS_PATH,
+    time: Date.now()
+  });
+
+});
+
+
+// ============================================================
+// ERROR DEL SERVIDOR WEBSOCKET
+// ============================================================
+
+wss.on('error', (err) => {
+
+  console.error(
+    '[WS] Error del servidor:',
+    err.message
   );
-}
+
+});
+
 
 // ============================================================
-// INICIAR SERVIDOR
+// INICIO
 // ============================================================
 
-async function start() {
+async function startServer() {
 
-  ensureDataDir();
+  console.log('');
+  console.log('==========================================');
+  console.log('        SERVIDOR CCR / AGL');
+  console.log('==========================================');
+
+
+  loadUsers();
 
   await initializeUsers();
+
+  saveUsers();
+
+
+  console.log('');
+  console.log(
+    `Servidor CCR activo en puerto ${PORT}`
+  );
+
+  console.log(
+    `WebSocket: ${WS_PATH}`
+  );
+
+  console.log(
+    `DEVICE_TOKEN configurado: ${DEVICE_TOKEN ? 'SI' : 'NO'}`
+  );
+
+  console.log(
+    `Persistencia: ${PERSISTENT ? 'SI' : 'NO'}`
+  );
+
+  console.log(
+    `Usuarios configurados: ${Object.keys(users).join(', ') || 'ninguno'}`
+  );
+
+  console.log('');
+  console.log('==========================================');
+
 
   server.listen(
     PORT,
     '0.0.0.0',
     () => {
 
-      console.log();
       console.log(
-        '=========================================='
+        `[HTTP] Escuchando en 0.0.0.0:${PORT}`
       );
 
-      console.log(
-        '     SERVIDOR CCR / AGL'
-      );
-
-      console.log(
-        '=========================================='
-      );
-
-      console.log(
-        'Servidor CCR activo en puerto',
-        PORT
-      );
-
-      console.log(
-        'WebSocket: /ws'
-      );
-
-      console.log(
-        'DEVICE_TOKEN configurado:',
-        DEVICE_TOKEN
-          ? 'SI'
-          : 'NO'
-      );
-
-      console.log(
-        'Persistencia:',
-        PERSISTENT
-          ? 'SI'
-          : 'NO'
-      );
-
-      console.log(
-        'Usuarios configurados:',
-        Object.keys(users)
-          .join(', ') ||
-          '(ninguno)'
-      );
-
-      console.log(
-        '=========================================='
-      );
-
-      console.log();
     }
   );
 }
 
-// ============================================================
-// MANEJO DE ERRORES
-// ============================================================
-
-process.on(
-  'uncaughtException',
-  (err) => {
-
-    console.error(
-      '[PROCESS] uncaughtException:',
-      err
-    );
-  }
-);
-
-process.on(
-  'unhandledRejection',
-  (err) => {
-
-    console.error(
-      '[PROCESS] unhandledRejection:',
-      err
-    );
-  }
-);
 
 // ============================================================
 // ARRANCAR
 // ============================================================
 
-start();
+startServer().catch((err) => {
+
+  console.error(
+    '[FATAL] No se pudo iniciar el servidor:',
+    err
+  );
+
+  process.exit(1);
+
+});
+
+
+// ============================================================
+// MANEJO DE CIERRE
+// ============================================================
+
+process.on('SIGTERM', () => {
+
+  console.log(
+    '[SERVER] SIGTERM recibido. Cerrando...'
+  );
+
+  server.close(() => {
+
+    console.log(
+      '[SERVER] Servidor cerrado.'
+    );
+
+    process.exit(0);
+  });
+
+});
+
+
+process.on('SIGINT', () => {
+
+  console.log(
+    '[SERVER] SIGINT recibido. Cerrando...'
+  );
+
+  server.close(() => {
+
+    console.log(
+      '[SERVER] Servidor cerrado.'
+    );
+
+    process.exit(0);
+  });
+
+});
